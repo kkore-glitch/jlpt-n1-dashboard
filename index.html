@@ -3,14 +3,14 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" content="#31546b" />
+    <meta name="theme-color" content="#f5f6f4" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="N1錯題" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>JLPT N1 錯題分析</title>
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="apple-touch-icon" href="./icons/icon-192.svg" />
-    <link rel="stylesheet" href="./styles.css?v=4" />
+    <link rel="stylesheet" href="./styles.css?v=5" />
   </head>
   <body>
     <header class="app-header">
@@ -30,14 +30,26 @@
       <section class="source-panel" aria-label="資料來源">
         <div class="field wide">
           <label for="sheetSource">Google Sheet 連結</label>
-          <input id="sheetSource" type="url" placeholder="貼上 Google Sheet 分享網址或 CSV 發布連結" />
+          <input id="sheetSource" type="url" placeholder="貼上你的錯題 Google Sheet 網址" />
         </div>
         <div class="field small">
           <label for="targetDate">考試日</label>
           <input id="targetDate" type="date" value="2026-12-06" />
         </div>
         <button id="saveSourceBtn" class="primary-button" type="button">同步</button>
-        <button id="sampleBtn" class="ghost-button" type="button">範例</button>
+        <button id="openSheetBtn" class="ghost-button" type="button">開啟表格</button>
+      </section>
+
+      <section id="setupPanel" class="setup-panel" aria-label="連結說明">
+        <div>
+          <h2>先連結你的 Google Sheet</h2>
+          <p>錯題只維護在 Google Sheet。這個 PWA 會讀取同一張表，更新後按同步即可刷新儀表板。</p>
+        </div>
+        <ol>
+          <li>用 <a href="./google-sheet-template.csv" download>範本欄位</a> 建立或匯入一張 Google Sheet。</li>
+          <li>在 Google Sheet 輸入錯題，並把工作表發布到網路。</li>
+          <li>把那張 Google Sheet 的網址貼在上方，按同步。</li>
+        </ol>
       </section>
 
       <section class="filter-panel" aria-label="資料篩選">
@@ -177,6 +189,6 @@
       </section>
     </main>
 
-    <script src="./app.js?v=4" defer></script>
+    <script src="./app.js?v=5" defer></script>
   </body>
 </html>

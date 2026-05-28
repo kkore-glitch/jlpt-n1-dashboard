@@ -1,4 +1,4 @@
-const CACHE_NAME = "jlpt-n1-tracker-v4";
+const CACHE_NAME = "jlpt-n1-tracker-v5";
 const APP_FILES = [
   "./",
   "./index.html",

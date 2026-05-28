@@ -17,17 +17,17 @@ const HEADERS = {
 
 const SECTION_ORDER = ["單字語彙", "文法", "讀解", "聽解"];
 const SECTION_COLORS = {
-  "單字語彙": "#31546b",
-  "文法": "#4f6f52",
-  "讀解": "#c99d39",
-  "聽解": "#d86f45"
+  "單字語彙": "#2563a8",
+  "文法": "#0f766e",
+  "讀解": "#b88316",
+  "聽解": "#e85d4f"
 };
 const STATUS_COLORS = {
-  "未複習": "#d86f45",
-  "已複習一次": "#c99d39",
-  "一週後再測 OK": "#4f6f52",
+  "未複習": "#e85d4f",
+  "已複習一次": "#b88316",
+  "一週後再測 OK": "#0f766e",
   "一週後再測錯": "#b94f4f",
-  "已掌握": "#31546b"
+  "已掌握": "#2563a8"
 };
 const STATUS_ORDER = ["未複習", "已複習一次", "一週後再測錯", "一週後再測 OK", "已掌握"];
 
@@ -84,7 +84,7 @@ function parseCsv(text) {
 
 function toCsvUrl(config) {
   const source = config.sheetSource || config.csvUrl || "";
-  if (!source) return SAMPLE_URL;
+  if (!source) return "";
   if (source.includes("output=csv") || source.includes("format=csv")) return source;
   if (source.includes("/pubhtml")) return source.replace("/pubhtml", "/pub").replace(/([?&])single=true&?/, "$1").replace(/[?&]$/, "") + "?output=csv";
   if (source.includes("/pub?")) return source.includes("?") ? `${source}&output=csv` : `${source}?output=csv`;
@@ -93,6 +93,14 @@ function toCsvUrl(config) {
   if (!id) return source;
   const gid = source.match(/[?#&]gid=([0-9]+)/)?.[1] || "0";
   return `https://docs.google.com/spreadsheets/d/${id}/export?format=csv&gid=${gid}`;
+}
+
+function toSheetUrl(source) {
+  if (!source) return "";
+  const id = source.match(/\/spreadsheets\/d\/([^/?#]+)/)?.[1];
+  const gid = source.match(/[?#&]gid=([0-9]+)/)?.[1];
+  if (!id) return source;
+  return `https://docs.google.com/spreadsheets/d/${id}/edit${gid ? `#gid=${gid}` : ""}`;
 }
 
 function parseDate(value) {
@@ -223,10 +231,10 @@ function renderTrend(records) {
     <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="每週錯題趨勢">
       <line x1="${pad.left}" y1="${pad.top + plotH}" x2="${pad.left + plotW}" y2="${pad.top + plotH}" stroke="#d9dedc" />
       <line x1="${pad.left}" y1="${pad.top}" x2="${pad.left}" y2="${pad.top + plotH}" stroke="#d9dedc" />
-      <polygon points="${area}" fill="rgba(49,84,107,.12)"></polygon>
-      <polyline points="${line}" fill="none" stroke="#31546b" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"></polyline>
+      <polygon points="${area}" fill="rgba(15,118,110,.12)"></polygon>
+      <polyline points="${line}" fill="none" stroke="#0f766e" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"></polyline>
       ${coords.map((point) => `
-        <circle cx="${point.x}" cy="${point.y}" r="5" fill="#d86f45"></circle>
+        <circle cx="${point.x}" cy="${point.y}" r="5" fill="#e85d4f"></circle>
         <text x="${point.x}" y="${point.y - 10}" text-anchor="middle" class="trend-axis">${point.count}</text>
         <text x="${point.x}" y="${height - 12}" text-anchor="middle" class="trend-axis">${Number(point.key.slice(5,7))}/${Number(point.key.slice(8,10))}</text>
       `).join("")}
@@ -356,6 +364,12 @@ function render(records, targetDate) {
   renderTables(records);
 }
 
+function setSetupVisibility(config) {
+  const panel = $("setupPanel");
+  if (!panel) return;
+  panel.hidden = Boolean(config.sheetSource);
+}
+
 function getFilters() {
   return {
     section: $("sectionFilter")?.value || "",
@@ -408,6 +422,13 @@ function readConfigFromForm() {
 
 async function loadData(config, useSample = false) {
   const url = useSample ? SAMPLE_URL : toCsvUrl(config);
+  setSetupVisibility(config);
+  if (!url) {
+    allRecords = [];
+    render([], config.targetDate);
+    setText("syncStatus", "尚未連結");
+    return;
+  }
   setText("syncStatus", "同步中");
   try {
     const response = await fetch(url, { cache: "no-store" });
@@ -444,10 +465,10 @@ function bindEvents() {
     loadData(config);
   });
 
-  $("sampleBtn").addEventListener("click", () => {
+  $("openSheetBtn")?.addEventListener("click", () => {
     const config = readConfigFromForm();
-    setConfig(config);
-    loadData(config, true);
+    const sheetUrl = toSheetUrl(config.sheetSource);
+    if (sheetUrl) window.open(sheetUrl, "_blank", "noopener");
   });
 
   $("targetDate").addEventListener("change", () => {
@@ -475,4 +496,4 @@ if ("serviceWorker" in navigator) {
 const initialConfig = getConfig();
 fillConfig(initialConfig);
 bindEvents();
-loadData(initialConfig, !initialConfig.sheetSource);
+loadData(initialConfig);

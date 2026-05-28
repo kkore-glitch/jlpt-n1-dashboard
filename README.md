@@ -18,12 +18,20 @@
 
 ## 連接 Google Sheet
 
+Google Sheet 是唯一要維護的資料來源。PWA 不要求你編輯 CSV；它只是用 Google Sheet 對外提供的表格資料來產生儀表板。
+
 PWA 只需要貼上一個 Google Sheet 連結。支援：
 
 - Google Sheet 一般分享網址
 - Google Sheet「發布到網路」產生的 CSV 連結
 
-建議方式：Google Sheet 選擇「檔案」→「共用」→「發布到網路」，發布工作表後把連結貼到 PWA 的「Google Sheet 連結」。
+建議方式：
+
+1. 建立一張 Google Sheet，第一列使用下方欄位。
+2. 在 Google Sheet 維護錯題資料。
+3. Google Sheet 選擇「檔案」→「共用」→「發布到網路」。
+4. 把那張表的網址貼到 PWA 的「Google Sheet 連結」。
+5. 之後新增錯題都在 Google Sheet 做，PWA 按「同步」刷新。
 
 私人 Google Sheet 不能直接由純前端 PWA 讀取；若要維持私人權限，需要另外做 Apps Script 或 Google API OAuth。
 
