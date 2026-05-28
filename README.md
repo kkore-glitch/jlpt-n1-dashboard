@@ -31,7 +31,7 @@ PWA 只需要貼上一個 Google Sheet 連結。支援：
 2. 在 Google Sheet 維護錯題資料。
 3. Google Sheet 選擇「檔案」→「共用」→「發布到網路」。
 4. 把那張表的網址貼到 PWA 的「Google Sheet 連結」。
-5. 之後新增錯題都在 Google Sheet 做，PWA 按「同步」刷新。
+5. 之後新增錯題都在 Google Sheet 做，PWA 按右上角刷新讀取最新資料。
 
 私人 Google Sheet 不能直接由純前端 PWA 讀取；若要維持私人權限，需要另外做 Apps Script 或 Google API OAuth。
 
@@ -45,6 +45,23 @@ PWA 只需要貼上一個 Google Sheet 連結。支援：
 - 到期複習清單
 - 最近錯題清單
 - 大項、複習狀態、關鍵字篩選
+
+## 直接從 PWA 更新複習狀態
+
+GitHub Pages 不能直接寫入 Google Sheet，所以狀態按鈕需要一個 Google Apps Script Web App。
+
+設定方式：
+
+1. 打開你的 Google Sheet。
+2. 選「擴充功能」→「Apps Script」。
+3. 把 `apps-script/Code.gs` 的內容貼進去。
+4. 可選：在 Apps Script 的「專案設定」→「指令碼屬性」新增 `UPDATE_TOKEN`，值填一段你自己知道的密碼。
+5. 按「部署」→「新增部署作業」→ 類型選「網頁應用程式」。
+6. 執行身分選「我」，存取權選「知道連結的任何人」。
+7. 複製 Web App URL，貼到 PWA 的「資料來源與寫入設定」。
+8. 如果有設定 `UPDATE_TOKEN`，同一段密碼也填到 PWA 的「更新密碼」。
+
+之後在 PWA 點「已掌握」「已複習」「再測錯」，就會更新 Google Sheet 的 `複習狀態` 欄位。
 
 ## 本機啟動
 

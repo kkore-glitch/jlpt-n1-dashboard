@@ -30,6 +30,20 @@ const STATUS_COLORS = {
   "已掌握": "#2563a8"
 };
 const STATUS_ORDER = ["未複習", "已複習一次", "一週後再測錯", "一週後再測 OK", "已掌握"];
+const ERROR_REASONS = [
+  "單字不熟",
+  "漢字讀音不熟",
+  "文法句型不熟",
+  "接續判斷錯",
+  "語感混淆",
+  "看太快",
+  "定位錯誤",
+  "推論過度",
+  "聽不出關鍵字",
+  "聽得懂但來不及選",
+  "被干擾選項騙",
+  "粗心"
+];
 
 const STORAGE_KEY = "jlpt-n1-tracker-config";
 const CACHE_KEY = "jlpt-n1-tracker-last-csv";
@@ -73,11 +87,12 @@ function parseCsv(text) {
   if (!rows.length) return [];
 
   const headers = rows[0].map((header) => header.trim());
-  return rows.slice(1).map((cells) => {
+  return rows.slice(1).map((cells, rowIndex) => {
     const item = {};
     headers.forEach((header, index) => {
       item[header] = cells[index] || "";
     });
+    item._rowNumber = rowIndex + 2;
     return item;
   });
 }
@@ -101,6 +116,10 @@ function toSheetUrl(source) {
   const gid = source.match(/[?#&]gid=([0-9]+)/)?.[1];
   if (!id) return source;
   return `https://docs.google.com/spreadsheets/d/${id}/edit${gid ? `#gid=${gid}` : ""}`;
+}
+
+function getSheetGid(source) {
+  return source.match(/[?#&]gid=([0-9]+)/)?.[1] || "";
 }
 
 function parseDate(value) {
@@ -187,6 +206,59 @@ function renderBars(id, entries, total, colorByLabel = null) {
   });
 }
 
+function renderDonut(id, entries, total, colorByLabel = null, centerLabel = "總數") {
+  const root = $(id);
+  root.innerHTML = "";
+  if (!entries.length || total === 0) {
+    root.innerHTML = `<div class="empty">沒有資料</div>`;
+    return;
+  }
+
+  const radius = 42;
+  const circumference = 2 * Math.PI * radius;
+  let offset = 0;
+  const segments = entries.map(([label, count], index) => {
+    const length = (count / total) * circumference;
+    const color = colorByLabel?.[label] || chartColor(index);
+    const dash = `${Math.max(0, length - 1)} ${circumference}`;
+    const segment = `
+      <circle class="donut-segment" cx="58" cy="58" r="${radius}"
+        stroke="${color}" stroke-dasharray="${dash}" stroke-dashoffset="${-offset}"></circle>
+    `;
+    offset += length;
+    return segment;
+  }).join("");
+
+  const legend = entries.map(([label, count], index) => {
+    const percent = Math.round((count / total) * 100);
+    const color = colorByLabel?.[label] || chartColor(index);
+    return `
+      <div class="donut-legend-row">
+        <span class="legend-dot" style="background:${color}"></span>
+        <span class="legend-label">${escapeHtml(label)}</span>
+        <strong>${count}</strong>
+        <span>${percent}%</span>
+      </div>
+    `;
+  }).join("");
+
+  root.innerHTML = `
+    <div class="donut-layout">
+      <svg class="donut-svg" viewBox="0 0 116 116" role="img" aria-label="${escapeHtml(centerLabel)}">
+        <circle class="donut-base" cx="58" cy="58" r="${radius}"></circle>
+        ${segments}
+        <text x="58" y="54" text-anchor="middle" class="donut-total">${total}</text>
+        <text x="58" y="72" text-anchor="middle" class="donut-label">${escapeHtml(centerLabel)}</text>
+      </svg>
+      <div class="donut-legend">${legend}</div>
+    </div>
+  `;
+}
+
+function chartColor(index) {
+  return ["#0f766e", "#2563a8", "#e85d4f", "#b88316", "#6854a3", "#b94a48", "#5b7c86", "#3f6b4f"][index % 8];
+}
+
 function escapeHtml(value) {
   return String(value).replace(/[&<>"']/g, (char) => ({
     "&": "&amp;",
@@ -249,32 +321,17 @@ function startOfWeek(date) {
   return copy;
 }
 
-function renderProjection(records, targetDate) {
+function daysUntilTarget(targetDate) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const target = parseDate(targetDate) || new Date(2026, 11, 6);
-  const days = Math.max(0, Math.ceil((target - today) / 86400000));
-  const weeks = Math.max(1, Math.ceil(days / 7));
-  const open = records.filter((record) => record.status !== "已掌握").length;
-  const weekly = Math.ceil(open / weeks);
-  const recent = records.filter((record) => record.date && today - record.date <= 14 * 86400000).length;
-  const pace = `最近兩週新增 ${recent} 題；目前未掌握 ${open} 題，平均每週 ${weekly} 題。`;
-
-  setText("daysLeft", `${days} 天`);
-  $("projection").innerHTML = `
-    <div class="projection-main">
-      <div class="projection-cell"><span>剩餘週數</span><strong>${weeks}</strong></div>
-      <div class="projection-cell"><span>未掌握/週</span><strong>${weekly}</strong></div>
-    </div>
-    <p class="projection-note">${pace}</p>
-  `;
+  return Math.max(0, Math.ceil((target - today) / 86400000));
 }
 
 function renderStatusBreakdown(records) {
-  const root = $("statusBars");
   const map = countBy(records, "status");
   const entries = topEntries(map, 8, STATUS_ORDER);
-  renderBars("statusBars", entries, records.length, STATUS_COLORS);
+  renderDonut("statusBars", entries, records.length, STATUS_COLORS, "狀態");
 }
 
 function renderStudyMix(records) {
@@ -305,9 +362,7 @@ function renderStudyMix(records) {
 function renderTables(records) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  const due = records
-    .filter((record) => record.status !== "已掌握")
-    .filter((record) => !record.reviewDate || record.reviewDate <= today)
+  const due = getDueRecords(records)
     .sort((a, b) => (a.reviewDate || today) - (b.reviewDate || today))
     .slice(0, 8);
 
@@ -319,10 +374,12 @@ function renderTables(records) {
         <td>${escapeHtml(record.section)}</td>
         <td>${escapeHtml(record.item)}</td>
         <td>${escapeHtml(record.reason)}</td>
+        <td><span class="status-chip">${escapeHtml(record.status)}</span></td>
         <td>${escapeHtml(record.reviewDateText)}</td>
+        <td>${renderStatusActions(record)}</td>
       </tr>
     `).join("")
-    : `<tr><td colspan="5" class="empty">沒有到期項目</td></tr>`;
+    : `<tr><td colspan="7" class="empty">沒有到期項目</td></tr>`;
 
   const recent = [...records]
     .sort((a, b) => (b.date || 0) - (a.date || 0))
@@ -335,16 +392,29 @@ function renderTables(records) {
         <td>${escapeHtml(record.type)}</td>
         <td>${escapeHtml(record.item)}</td>
         <td>${escapeHtml(record.answer)}</td>
+        <td><span class="status-chip">${escapeHtml(record.status)}</span></td>
+        <td>${renderStatusActions(record)}</td>
       </tr>
     `).join("")
-    : `<tr><td colspan="5" class="empty">沒有資料</td></tr>`;
+    : `<tr><td colspan="7" class="empty">沒有資料</td></tr>`;
+}
+
+function renderStatusActions(record) {
+  if (!record._rowNumber) return "";
+  return `
+    <div class="status-actions">
+      <button type="button" data-row="${record._rowNumber}" data-status="已掌握">已掌握</button>
+      <button type="button" data-row="${record._rowNumber}" data-status="已複習一次">已複習</button>
+      <button type="button" data-row="${record._rowNumber}" data-status="一週後再測錯">再測錯</button>
+    </div>
+  `;
 }
 
 function render(records, targetDate) {
   const total = records.length;
   const mastered = records.filter((record) => record.status === "已掌握").length;
   const open = total - mastered;
-  const mastery = total ? Math.round((mastered / total) * 100) : 0;
+  const due = getDueRecords(records).length;
   const sectionMap = countBy(records, "section");
   const reasonMap = countBy(records, "reason");
   const typeMap = countBy(records, "type");
@@ -352,15 +422,16 @@ function render(records, targetDate) {
 
   setText("totalErrors", total);
   setText("openErrors", open);
-  setText("masteryRate", `${mastery}%`);
+  setText("dueReviews", due);
+  setText("daysLeft", `${daysUntilTarget(targetDate)} 天`);
   setText("strongWeakLabel", sectionEntries[0] ? `最多：${sectionEntries[0][0]}` : "");
 
-  renderBars("sectionBars", sectionEntries, total, SECTION_COLORS);
+  renderDonut("sectionBars", sectionEntries, total, SECTION_COLORS, "大項");
   renderBars("reasonBars", topEntries(reasonMap, 8), total);
-  renderBars("typeBars", topEntries(typeMap, 8), total);
-  renderProjection(records, targetDate);
+  renderDonut("typeBars", topEntries(typeMap, 8), total, null, "題型");
   renderTrend(records);
   renderStatusBreakdown(records);
+  renderReasonInsight(records);
   renderTables(records);
 }
 
@@ -368,12 +439,15 @@ function setSetupVisibility(config) {
   const panel = $("setupPanel");
   if (!panel) return;
   panel.hidden = Boolean(config.sheetSource);
+  const settings = $("settingsPanel");
+  if (settings) settings.open = !config.sheetSource;
 }
 
 function getFilters() {
   return {
     section: $("sectionFilter")?.value || "",
     status: $("statusFilter")?.value || "",
+    reason: $("reasonFilter")?.value || "",
     keyword: ($("keywordFilter")?.value || "").trim().toLowerCase()
   };
 }
@@ -383,12 +457,42 @@ function applyFilters(records) {
   return records.filter((record) => {
     if (filters.section && record.section !== filters.section) return false;
     if (filters.status && record.status !== filters.status) return false;
+    if (filters.reason && record.reason !== filters.reason) return false;
     if (!filters.keyword) return true;
     const haystack = [record.item, record.answer, record.tags, record.reason, record.type, record.exam, record.note]
       .join(" ")
       .toLowerCase();
     return haystack.includes(filters.keyword);
   });
+}
+
+function getDueRecords(records) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return records
+    .filter((record) => record.status !== "已掌握")
+    .filter((record) => !record.reviewDate || record.reviewDate <= today);
+}
+
+function renderReasonInsight(filteredRecords) {
+  const selectedReason = $("reasonFilter")?.value || "";
+  const panel = $("reasonInsight");
+  if (!panel) return;
+  panel.hidden = !selectedReason;
+  if (!selectedReason) return;
+
+  const reasonRecords = filteredRecords.filter((record) => record.reason === selectedReason);
+  const topSection = topEntries(countBy(reasonRecords, "section"), 1)[0]?.[0] || "-";
+  const topType = topEntries(countBy(reasonRecords, "type"), 1)[0]?.[0] || "-";
+  const examples = reasonRecords.slice(0, 5).map((record) => `
+    <span>${escapeHtml(record.item || record.answer || record.type)}</span>
+  `).join("");
+
+  setText("reasonTitle", selectedReason);
+  setText("reasonCount", `${reasonRecords.length} 筆`);
+  setText("reasonSection", `常見大項 ${topSection}`);
+  setText("reasonType", `常見題型 ${topType}`);
+  $("reasonExamples").innerHTML = examples || `<span>目前篩選條件下沒有資料</span>`;
 }
 
 function rerenderFromState() {
@@ -400,7 +504,9 @@ function getConfig() {
   const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
   return {
     sheetSource: saved.sheetSource || saved.csvUrl || "",
-    targetDate: saved.targetDate || "2026-12-06"
+    targetDate: saved.targetDate || "2026-12-06",
+    updateEndpoint: saved.updateEndpoint || "",
+    updateToken: saved.updateToken || ""
   };
 }
 
@@ -411,12 +517,16 @@ function setConfig(config) {
 function fillConfig(config) {
   $("sheetSource").value = config.sheetSource;
   $("targetDate").value = config.targetDate;
+  $("updateEndpoint").value = config.updateEndpoint || "";
+  $("updateToken").value = config.updateToken || "";
 }
 
 function readConfigFromForm() {
   return {
     sheetSource: $("sheetSource").value.trim(),
-    targetDate: $("targetDate").value || "2026-12-06"
+    targetDate: $("targetDate").value || "2026-12-06",
+    updateEndpoint: $("updateEndpoint").value.trim(),
+    updateToken: $("updateToken").value.trim()
   };
 }
 
@@ -456,6 +566,8 @@ function bindEvents() {
   $("saveSourceBtn").addEventListener("click", () => {
     const config = readConfigFromForm();
     setConfig(config);
+    const settings = $("settingsPanel");
+    if (settings && config.sheetSource) settings.open = false;
     loadData(config);
   });
 
@@ -477,16 +589,54 @@ function bindEvents() {
     rerenderFromState();
   });
 
-  ["sectionFilter", "statusFilter", "keywordFilter"].forEach((id) => {
+  ["sectionFilter", "statusFilter", "reasonFilter", "keywordFilter"].forEach((id) => {
     $(id)?.addEventListener("input", rerenderFromState);
   });
 
   $("clearFiltersBtn")?.addEventListener("click", () => {
     $("sectionFilter").value = "";
     $("statusFilter").value = "";
+    $("reasonFilter").value = "";
     $("keywordFilter").value = "";
     rerenderFromState();
   });
+
+  document.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-row][data-status]");
+    if (!button) return;
+    updateStatus(Number(button.dataset.row), button.dataset.status);
+  });
+}
+
+async function updateStatus(row, status) {
+  const config = readConfigFromForm();
+  if (!config.updateEndpoint) {
+    alert("請先打開「狀態按鈕設定」，貼上 Apps Script Web App URL。");
+    return;
+  }
+
+  const body = new URLSearchParams({
+    row: String(row),
+    status,
+    gid: getSheetGid(config.sheetSource),
+    token: config.updateToken || ""
+  });
+
+  setText("syncStatus", "更新中");
+  try {
+    await fetch(config.updateEndpoint, {
+      method: "POST",
+      mode: "no-cors",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body
+    });
+
+    allRecords = allRecords.map((record) => record._rowNumber === row ? { ...record, status } : record);
+    rerenderFromState();
+    setText("syncStatus", `已更新：${status}`);
+  } catch (error) {
+    setText("syncStatus", "更新失敗");
+  }
 }
 
 if ("serviceWorker" in navigator) {

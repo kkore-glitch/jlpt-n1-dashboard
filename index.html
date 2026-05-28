@@ -10,7 +10,7 @@
     <title>JLPT N1 錯題分析</title>
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="apple-touch-icon" href="./icons/icon-192.svg" />
-    <link rel="stylesheet" href="./styles.css?v=5" />
+    <link rel="stylesheet" href="./styles.css?v=7" />
   </head>
   <body>
     <header class="app-header">
@@ -27,18 +27,29 @@
     </header>
 
     <main class="app-shell">
-      <section class="source-panel" aria-label="資料來源">
-        <div class="field wide">
-          <label for="sheetSource">Google Sheet 連結</label>
-          <input id="sheetSource" type="url" placeholder="貼上你的錯題 Google Sheet 網址" />
+      <details id="settingsPanel" class="settings-panel">
+        <summary>資料來源與寫入設定</summary>
+        <div class="settings-grid">
+          <div class="field wide">
+            <label for="sheetSource">Google Sheet 連結</label>
+            <input id="sheetSource" type="url" placeholder="貼上你的錯題 Google Sheet 網址" />
+          </div>
+          <div class="field small">
+            <label for="targetDate">考試日</label>
+            <input id="targetDate" type="date" value="2026-12-06" />
+          </div>
+          <div class="field">
+            <label for="updateEndpoint">Apps Script Web App URL</label>
+            <input id="updateEndpoint" type="url" placeholder="貼上部署後的 Web App URL" />
+          </div>
+          <div class="field">
+            <label for="updateToken">更新密碼</label>
+            <input id="updateToken" type="password" placeholder="可留空；建議設定" />
+          </div>
+          <button id="saveSourceBtn" class="primary-button" type="button">儲存並讀取</button>
+          <button id="openSheetBtn" class="ghost-button" type="button">開啟表格</button>
         </div>
-        <div class="field small">
-          <label for="targetDate">考試日</label>
-          <input id="targetDate" type="date" value="2026-12-06" />
-        </div>
-        <button id="saveSourceBtn" class="primary-button" type="button">同步</button>
-        <button id="openSheetBtn" class="ghost-button" type="button">開啟表格</button>
-      </section>
+      </details>
 
       <section id="setupPanel" class="setup-panel" aria-label="連結說明">
         <div>
@@ -75,10 +86,49 @@
           </select>
         </div>
         <div class="field">
+          <label for="reasonFilter">錯誤原因</label>
+          <select id="reasonFilter">
+            <option value="">全部</option>
+            <option value="單字不熟">單字不熟</option>
+            <option value="漢字讀音不熟">漢字讀音不熟</option>
+            <option value="文法句型不熟">文法句型不熟</option>
+            <option value="接續判斷錯">接續判斷錯</option>
+            <option value="語感混淆">語感混淆</option>
+            <option value="看太快">看太快</option>
+            <option value="定位錯誤">定位錯誤</option>
+            <option value="推論過度">推論過度</option>
+            <option value="聽不出關鍵字">聽不出關鍵字</option>
+            <option value="聽得懂但來不及選">聽得懂但來不及選</option>
+            <option value="被干擾選項騙">被干擾選項騙</option>
+            <option value="粗心">粗心</option>
+          </select>
+        </div>
+        <div class="field">
           <label for="keywordFilter">關鍵字</label>
           <input id="keywordFilter" type="search" placeholder="錯誤內容、正解、標籤" />
         </div>
         <button id="clearFiltersBtn" class="ghost-button" type="button">清除</button>
+      </section>
+
+      <section id="reasonInsight" class="reason-insight" hidden aria-label="錯誤原因內容">
+        <div>
+          <span>目前選擇的錯誤原因</span>
+          <strong id="reasonTitle">-</strong>
+        </div>
+        <div class="reason-stats">
+          <span id="reasonCount">0 筆</span>
+          <span id="reasonSection">大項 -</span>
+          <span id="reasonType">題型 -</span>
+        </div>
+        <div id="reasonExamples" class="reason-examples"></div>
+      </section>
+
+      <section class="status-guide" aria-label="複習狀態更新方式">
+        <div>
+          <span>狀態更新方式</span>
+          <strong>設定狀態按鈕後，可直接從表格寫回 Google Sheet</strong>
+        </div>
+        <p>點「已掌握」會寫回同一張 Google Sheet，畫面也會立即更新。只有你直接到 Google Sheet 新增或修改錯題時，才需要按右上角刷新。</p>
       </section>
 
       <section class="metrics-grid" aria-label="總覽指標">
@@ -91,8 +141,8 @@
           <strong id="openErrors">0</strong>
         </article>
         <article class="metric">
-          <span>掌握率</span>
-          <strong id="masteryRate">0%</strong>
+          <span>到期複習</span>
+          <strong id="dueReviews">0</strong>
         </article>
         <article class="metric">
           <span>距離考試</span>
@@ -101,19 +151,12 @@
       </section>
 
       <section class="dashboard-grid">
-        <article class="panel span-7">
+        <article class="panel span-6">
           <div class="panel-heading">
             <h2>四大項分布</h2>
             <span id="strongWeakLabel"></span>
           </div>
           <div id="sectionBars" class="bar-chart"></div>
-        </article>
-
-        <article class="panel span-5">
-          <div class="panel-heading">
-            <h2>日期推演</h2>
-          </div>
-          <div id="projection" class="projection"></div>
         </article>
 
         <article class="panel span-6">
@@ -139,7 +182,7 @@
 
         <article class="panel span-5">
           <div class="panel-heading">
-            <h2>複習狀態</h2>
+            <h2>複習進度</h2>
           </div>
           <div id="statusBars" class="bar-chart compact"></div>
         </article>
@@ -159,7 +202,9 @@
                   <th>大項</th>
                   <th>錯誤內容</th>
                   <th>原因</th>
+                  <th>狀態</th>
                   <th>下次</th>
+                  <th>操作</th>
                 </tr>
               </thead>
               <tbody id="reviewRows"></tbody>
@@ -180,6 +225,8 @@
                   <th>題型</th>
                   <th>錯誤內容</th>
                   <th>正解</th>
+                  <th>狀態</th>
+                  <th>操作</th>
                 </tr>
               </thead>
               <tbody id="recentRows"></tbody>
@@ -189,6 +236,6 @@
       </section>
     </main>
 
-    <script src="./app.js?v=5" defer></script>
+    <script src="./app.js?v=7" defer></script>
   </body>
 </html>
