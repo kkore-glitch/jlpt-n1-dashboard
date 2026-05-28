@@ -43,11 +43,14 @@ const CACHE_KEY = "jlpt-n1-tracker-last-csv";
 const LOCAL_STATUS_OVERRIDES_KEY = "jlpt-n1-status-overrides";
 const SAMPLE_URL = "./google-sheet-template.csv";
 const DEFAULT_SHEET_SOURCE = "https://docs.google.com/spreadsheets/d/1zL9Jog4muHGFrwnNM8NkfEQ9nSuOi9XeQ1CymxKG2g4/edit?gid=0#gid=0";
+const MASTERED_STATUS = "已掌握";
+const UNMASTERED_STATUS = "未複習";
 
 const $ = (id) => document.getElementById(id);
 let allRecords = [];
 let currentRecords = [];
 let selectedRow = null;
+let cardTouchStartX = null;
 
 function parseCsv(text) {
   const rows = [];
@@ -311,13 +314,21 @@ function daysUntilTarget(targetDate) {
   return Math.max(0, Math.ceil((target - today) / 86400000));
 }
 
+function isMastered(record) {
+  return record.status === MASTERED_STATUS;
+}
+
+function getUnmasteredRecords(records) {
+  return records.filter((record) => !isMastered(record));
+}
+
 function renderFlashcards(records) {
   const root = $("flashcardGrid");
   if (!root) return;
 
   const sorted = [...records].sort((a, b) => {
-    const am = a.status === "已掌握" ? 1 : 0;
-    const bm = b.status === "已掌握" ? 1 : 0;
+    const am = isMastered(a) ? 1 : 0;
+    const bm = isMastered(b) ? 1 : 0;
     if (am !== bm) return am - bm;
     return (b.date || 0) - (a.date || 0);
   });
@@ -329,17 +340,17 @@ function renderFlashcards(records) {
   }
 
   root.innerHTML = sorted.map((record) => {
-    const selected = record._rowNumber === selectedRow ? " is-selected" : "";
-    const mastered = record.status === "已掌握" ? " is-mastered" : "";
+    const selected = record._rowNumber === selectedRow && !isMastered(record) ? " is-selected" : "";
+    const mastered = isMastered(record) ? " is-mastered" : "";
     return `
-      <article class="flashcard${selected}${mastered}" data-view-row="${record._rowNumber || ""}">
-        <div class="flashcard-meta">${escapeHtml([record.section, record.type, record.exam].filter(Boolean).join("｜") || "未分類")}</div>
-        <div class="flashcard-front">${escapeHtml(record.item || "-")}</div>
-        ${record.reading ? `<div class="flashcard-reading">${escapeHtml(record.reading)}</div>` : ""}
-        <div class="flashcard-answer"><span class="flashcard-label">正解/意思</span><br><strong>${escapeHtml(record.answer || "-")}</strong></div>
-        ${record.note ? `<div class="flashcard-note">${escapeHtml(record.note)}</div>` : ""}
+      <article class="flashcard summary-card${selected}${mastered}" data-view-row="${record._rowNumber || ""}">
+        <div class="summary-card-main">
+          <div class="flashcard-meta">${escapeHtml([record.section, record.type].filter(Boolean).join("｜") || "未分類")}</div>
+          <div class="summary-card-title">${escapeHtml(record.item || "-")}</div>
+          <div class="summary-card-answer">${escapeHtml(record.answer || "-")}</div>
+        </div>
         <div class="flashcard-footer">
-          <span class="status-chip">${record.status === "已掌握" ? "已掌握" : "未掌握"}</span>
+          <span class="status-chip">${isMastered(record) ? "已掌握" : "未掌握"}</span>
           ${renderMasteryAction(record)}
         </div>
       </article>
@@ -348,46 +359,67 @@ function renderFlashcards(records) {
 }
 
 function renderMasteryAction(record) {
-  if (!record._rowNumber || record.status === "已掌握") return "";
-  return `<button class="mastery-button" type="button" data-row="${record._rowNumber}" data-status="已掌握">標記已掌握</button>`;
+  if (!record._rowNumber) return "";
+  if (isMastered(record)) {
+    return `<button class="mastery-button secondary" type="button" data-row="${record._rowNumber}" data-status="${UNMASTERED_STATUS}">未掌握</button>`;
+  }
+  return `<button class="mastery-button" type="button" data-row="${record._rowNumber}" data-status="${MASTERED_STATUS}">已掌握</button>`;
 }
 
-function renderErrorDetail(records) {
+function renderReviewCarousel(records) {
   const root = $("errorDetail");
   if (!root) return;
-  if (!records.length) {
+  const reviewRecords = getUnmasteredRecords(records);
+  if (!reviewRecords.length) {
     selectedRow = null;
-    setText("detailMeta", "沒有資料");
-    root.innerHTML = `<div class="empty">選擇一張字卡後，這裡會顯示完整內容。</div>`;
+    setText("detailMeta", "沒有未掌握項目");
+    root.innerHTML = `<div class="empty">目前沒有未掌握的字卡。</div>`;
     return;
   }
 
-  if (!selectedRow || !records.some((record) => record._rowNumber === selectedRow)) {
-    selectedRow = records[0]._rowNumber;
+  if (!selectedRow || !reviewRecords.some((record) => record._rowNumber === selectedRow)) {
+    selectedRow = reviewRecords[0]._rowNumber;
   }
 
-  const record = records.find((item) => item._rowNumber === selectedRow);
-  setText("detailMeta", `${record.exam || "未標回次"}｜${record.section}｜${record.type}`);
+  const index = Math.max(0, reviewRecords.findIndex((item) => item._rowNumber === selectedRow));
+  const record = reviewRecords[index];
+  setText("detailMeta", `${index + 1}/${reviewRecords.length}｜${record.section}｜${record.type}`);
   root.innerHTML = `
-    <div class="detail-main">
-      <span>錯誤內容</span>
-      <strong>${escapeHtml(record.item || "-")}</strong>
-    </div>
-    <div class="detail-grid">
-      ${detailItem("正解/意思", record.answer)}
-      ${detailItem("讀音/原句", record.reading)}
-      ${detailItem("我的答案", record.mine)}
-      ${detailItem("錯誤原因", record.reason)}
-      ${detailItem("標籤", record.tags)}
-      ${detailItem("備註", record.note)}
-    </div>
-    <div class="detail-status">
-      <div class="mastery-row">
-        <span class="status-chip">${record.status === "已掌握" ? "已掌握" : "未掌握"}</span>
-        ${renderMasteryAction(record)}
+    <div class="review-carousel">
+      <button class="carousel-button" type="button" data-carousel="prev" aria-label="上一張">‹</button>
+      <div class="review-card">
+        <div class="detail-main">
+          <span>錯誤內容</span>
+          <strong>${escapeHtml(record.item || "-")}</strong>
+        </div>
+        <div class="detail-grid">
+          ${detailItem("正解/意思", record.answer)}
+          ${detailItem("讀音/原句", record.reading)}
+          ${detailItem("我的答案", record.mine)}
+          ${detailItem("錯誤原因", record.reason)}
+          ${detailItem("標籤", record.tags)}
+          ${detailItem("備註", record.note)}
+        </div>
+        <div class="detail-status">
+          <div class="mastery-row">
+            <span class="status-chip">未掌握</span>
+            ${renderMasteryAction(record)}
+          </div>
+        </div>
       </div>
+      <button class="carousel-button" type="button" data-carousel="next" aria-label="下一張">›</button>
     </div>
   `;
+}
+
+function changeReviewCard(direction) {
+  const reviewRecords = getUnmasteredRecords(currentRecords);
+  if (!reviewRecords.length) return;
+  const currentIndex = Math.max(0, reviewRecords.findIndex((record) => record._rowNumber === selectedRow));
+  const nextIndex = (currentIndex + direction + reviewRecords.length) % reviewRecords.length;
+  selectedRow = reviewRecords[nextIndex]._rowNumber;
+  renderReviewCarousel(currentRecords);
+  renderFlashcards(currentRecords);
 }
 
 function detailItem(label, value) {
@@ -419,7 +451,7 @@ function render(records, targetDate) {
   renderBars("reasonBars", topEntries(reasonMap, 8), total);
   renderDonut("typeBars", topEntries(typeMap, 8), total, null, "題");
   renderReasonInsight(records);
-  renderErrorDetail(records);
+  renderReviewCarousel(records);
   renderFlashcards(records);
 }
 
@@ -669,6 +701,12 @@ function bindEvents() {
   });
 
   document.addEventListener("click", (event) => {
+    const carouselButton = event.target.closest("[data-carousel]");
+    if (carouselButton) {
+      changeReviewCard(carouselButton.dataset.carousel === "next" ? 1 : -1);
+      return;
+    }
+
     const button = event.target.closest("[data-row][data-status]");
     if (button) {
       updateStatus(Number(button.dataset.row), button.dataset.status);
@@ -677,12 +715,28 @@ function bindEvents() {
 
     const viewButton = event.target.closest(".flashcard[data-view-row]");
     if (viewButton) {
-      selectedRow = Number(viewButton.dataset.viewRow);
-      renderErrorDetail(currentRecords);
+      const targetRow = Number(viewButton.dataset.viewRow);
+      if (currentRecords.some((record) => record._rowNumber === targetRow && !isMastered(record))) {
+        selectedRow = targetRow;
+        renderReviewCarousel(currentRecords);
+      }
       renderFlashcards(currentRecords);
       return;
     }
   });
+
+  $("errorDetail")?.addEventListener("touchstart", (event) => {
+    cardTouchStartX = event.changedTouches[0]?.clientX ?? null;
+  }, { passive: true });
+
+  $("errorDetail")?.addEventListener("touchend", (event) => {
+    if (cardTouchStartX == null) return;
+    const endX = event.changedTouches[0]?.clientX ?? cardTouchStartX;
+    const diff = endX - cardTouchStartX;
+    cardTouchStartX = null;
+    if (Math.abs(diff) < 45) return;
+    changeReviewCard(diff < 0 ? 1 : -1);
+  }, { passive: true });
 }
 
 async function updateStatus(row, status) {
