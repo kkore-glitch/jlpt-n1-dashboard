@@ -22,14 +22,6 @@ const SECTION_COLORS = {
   "讀解": "#b88316",
   "聽解": "#e85d4f"
 };
-const STATUS_COLORS = {
-  "未複習": "#e85d4f",
-  "已複習一次": "#b88316",
-  "一週後再測 OK": "#0f766e",
-  "一週後再測錯": "#b94f4f",
-  "已掌握": "#2563a8"
-};
-const STATUS_ORDER = ["未複習", "已複習一次", "一週後再測錯", "一週後再測 OK", "已掌握"];
 const ERROR_REASONS = [
   "單字不熟",
   "漢字讀音不熟",
@@ -40,14 +32,17 @@ const ERROR_REASONS = [
   "定位錯誤",
   "推論過度",
   "聽不出關鍵字",
-  "聽得懂但來不及選",
+  "聽到內容但來不及選",
   "被干擾選項騙",
   "粗心"
 ];
+const LEGACY_LISTENING_LATE_REASON = "\u807d\u5f97\u61c2\u4f46\u4f86\u4e0d\u53ca\u9078";
 
 const STORAGE_KEY = "jlpt-n1-tracker-config";
 const CACHE_KEY = "jlpt-n1-tracker-last-csv";
+const LOCAL_STATUS_OVERRIDES_KEY = "jlpt-n1-status-overrides";
 const SAMPLE_URL = "./google-sheet-template.csv";
+const DEFAULT_SHEET_SOURCE = "https://docs.google.com/spreadsheets/d/1zL9Jog4muHGFrwnNM8NkfEQ9nSuOi9XeQ1CymxKG2g4/edit?gid=0#gid=0";
 
 const $ = (id) => document.getElementById(id);
 let allRecords = [];
@@ -182,13 +177,19 @@ function normalizeRecord(record) {
     reading: record[HEADERS.reading] || "",
     answer: record[HEADERS.answer] || "",
     mine: record[HEADERS.mine] || "",
-    reason: record[HEADERS.reason] || "未分類",
+    reason: normalizeReason(record[HEADERS.reason] || "未分類"),
     tags: record[HEADERS.tags] || "",
     status: record[HEADERS.status] || "未複習",
     reviewDateText: record[HEADERS.reviewDate] || "",
     reviewDate: parseDate(record[HEADERS.reviewDate]),
     note: record[HEADERS.note] || ""
   };
+}
+
+function normalizeReason(value) {
+  return String(value || "").trim() === LEGACY_LISTENING_LATE_REASON
+    ? "聽到內容但來不及選"
+    : value;
 }
 
 function countBy(records, key) {
@@ -240,7 +241,7 @@ function renderBars(id, entries, total, colorByLabel = null) {
   });
 }
 
-function renderDonut(id, entries, total, colorByLabel = null, centerLabel = "總數") {
+function renderDonut(id, entries, total, colorByLabel = null, centerLabel = "題") {
   const root = $(id);
   root.innerHTML = "";
   if (!entries.length || total === 0) {
@@ -303,58 +304,6 @@ function escapeHtml(value) {
   })[char]);
 }
 
-function renderTrend(records) {
-  const root = $("trendChart");
-  const dated = records.filter((record) => record.date).sort((a, b) => a.date - b.date);
-  if (!dated.length) {
-    root.innerHTML = `<div class="empty">沒有日期資料</div>`;
-    return;
-  }
-
-  const groups = new Map();
-  dated.forEach((record) => {
-    const week = startOfWeek(record.date);
-    const key = week.toISOString().slice(0, 10);
-    groups.set(key, (groups.get(key) || 0) + 1);
-  });
-  const points = [...groups.entries()].slice(-10);
-  const max = Math.max(...points.map(([, count]) => count), 1);
-  const width = 720;
-  const height = 230;
-  const pad = { left: 36, right: 18, top: 22, bottom: 38 };
-  const plotW = width - pad.left - pad.right;
-  const plotH = height - pad.top - pad.bottom;
-
-  const coords = points.map(([key, count], index) => {
-    const x = pad.left + (points.length === 1 ? plotW / 2 : (plotW / (points.length - 1)) * index);
-    const y = pad.top + plotH - (count / max) * plotH;
-    return { key, count, x, y };
-  });
-  const line = coords.map((point) => `${point.x},${point.y}`).join(" ");
-  const area = `${pad.left},${pad.top + plotH} ${line} ${pad.left + plotW},${pad.top + plotH}`;
-
-  root.innerHTML = `
-    <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="每週錯題趨勢">
-      <line x1="${pad.left}" y1="${pad.top + plotH}" x2="${pad.left + plotW}" y2="${pad.top + plotH}" stroke="#d9dedc" />
-      <line x1="${pad.left}" y1="${pad.top}" x2="${pad.left}" y2="${pad.top + plotH}" stroke="#d9dedc" />
-      <polygon points="${area}" fill="rgba(15,118,110,.12)"></polygon>
-      <polyline points="${line}" fill="none" stroke="#0f766e" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"></polyline>
-      ${coords.map((point) => `
-        <circle cx="${point.x}" cy="${point.y}" r="5" fill="#e85d4f"></circle>
-        <text x="${point.x}" y="${point.y - 10}" text-anchor="middle" class="trend-axis">${point.count}</text>
-        <text x="${point.x}" y="${height - 12}" text-anchor="middle" class="trend-axis">${Number(point.key.slice(5,7))}/${Number(point.key.slice(8,10))}</text>
-      `).join("")}
-    </svg>
-  `;
-}
-
-function startOfWeek(date) {
-  const copy = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-  const day = copy.getDay() || 7;
-  copy.setDate(copy.getDate() - day + 1);
-  return copy;
-}
-
 function daysUntilTarget(targetDate) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -362,91 +311,45 @@ function daysUntilTarget(targetDate) {
   return Math.max(0, Math.ceil((target - today) / 86400000));
 }
 
-function renderStatusBreakdown(records) {
-  const map = countBy(records, "status");
-  const entries = topEntries(map, 8, STATUS_ORDER);
-  renderDonut("statusBars", entries, records.length, STATUS_COLORS, "狀態");
-}
-
-function renderStudyMix(records) {
-  const root = $("studyMix");
+function renderFlashcards(records) {
+  const root = $("flashcardGrid");
   if (!root) return;
-  const map = countBy(records.filter((record) => record.status !== "已掌握"), "section");
-  const entries = topEntries(map, 4, SECTION_ORDER);
-  const total = entries.reduce((sum, [, count]) => sum + count, 0);
-  root.innerHTML = "";
-  if (!total) {
-    root.innerHTML = `<div class="empty">沒有未掌握項目</div>`;
+
+  const sorted = [...records].sort((a, b) => {
+    const am = a.status === "已掌握" ? 1 : 0;
+    const bm = b.status === "已掌握" ? 1 : 0;
+    if (am !== bm) return am - bm;
+    return (b.date || 0) - (a.date || 0);
+  });
+
+  setText("cardCount", `${sorted.length} 張`);
+  if (!sorted.length) {
+    root.innerHTML = `<div class="empty">沒有符合條件的字卡</div>`;
     return;
   }
 
-  entries.forEach(([label, count]) => {
-    const percent = Math.round((count / total) * 100);
-    const row = document.createElement("div");
-    row.className = "mix-row";
-    row.innerHTML = `
-      <div>${escapeHtml(label)}</div>
-      <div class="mix-pill"><span style="width:${percent}%;background:${SECTION_COLORS[label] || "#4f6f52"}"></span></div>
-      <strong>${percent}%</strong>
+  root.innerHTML = sorted.map((record) => {
+    const selected = record._rowNumber === selectedRow ? " is-selected" : "";
+    const mastered = record.status === "已掌握" ? " is-mastered" : "";
+    return `
+      <article class="flashcard${selected}${mastered}" data-view-row="${record._rowNumber || ""}">
+        <div class="flashcard-meta">${escapeHtml([record.section, record.type, record.exam].filter(Boolean).join("｜") || "未分類")}</div>
+        <div class="flashcard-front">${escapeHtml(record.item || "-")}</div>
+        ${record.reading ? `<div class="flashcard-reading">${escapeHtml(record.reading)}</div>` : ""}
+        <div class="flashcard-answer"><span class="flashcard-label">正解/意思</span><br><strong>${escapeHtml(record.answer || "-")}</strong></div>
+        ${record.note ? `<div class="flashcard-note">${escapeHtml(record.note)}</div>` : ""}
+        <div class="flashcard-footer">
+          <span class="status-chip">${record.status === "已掌握" ? "已掌握" : "未掌握"}</span>
+          ${renderMasteryAction(record)}
+        </div>
+      </article>
     `;
-    root.appendChild(row);
-  });
+  }).join("");
 }
 
-function renderTables(records) {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const due = getDueRecords(records)
-    .sort((a, b) => (a.reviewDate || today) - (b.reviewDate || today))
-    .slice(0, 8);
-
-  setText("reviewCount", `${due.length} 項`);
-  $("reviewRows").innerHTML = due.length
-    ? due.map((record) => `
-      <tr>
-        <td>${escapeHtml(record.dateText)}</td>
-        <td>${escapeHtml(record.section)}</td>
-        <td>${escapeHtml(record.item)}</td>
-        <td>${escapeHtml(record.reason)}</td>
-        <td><span class="status-chip">${escapeHtml(record.status)}</span></td>
-        <td>${escapeHtml(record.reviewDateText)}</td>
-        <td>${renderViewAction(record)}</td>
-      </tr>
-    `).join("")
-    : `<tr><td colspan="7" class="empty">沒有到期項目</td></tr>`;
-
-  const recent = [...records]
-    .sort((a, b) => (b.date || 0) - (a.date || 0))
-    .slice(0, 10);
-  $("recentRows").innerHTML = recent.length
-    ? recent.map((record) => `
-      <tr>
-        <td>${escapeHtml(record.dateText)}</td>
-        <td>${escapeHtml(record.exam)}</td>
-        <td>${escapeHtml(record.type)}</td>
-        <td>${escapeHtml(record.item)}</td>
-        <td>${escapeHtml(record.answer)}</td>
-        <td><span class="status-chip">${escapeHtml(record.status)}</span></td>
-        <td>${renderViewAction(record)}</td>
-      </tr>
-    `).join("")
-    : `<tr><td colspan="7" class="empty">沒有資料</td></tr>`;
-}
-
-function renderViewAction(record) {
-  if (!record._rowNumber) return "";
-  return `<button class="view-button" type="button" data-view-row="${record._rowNumber}">查看</button>`;
-}
-
-function renderStatusActions(record) {
-  if (!record._rowNumber) return "";
-  return `
-    <div class="status-actions">
-      <button type="button" data-row="${record._rowNumber}" data-status="已掌握">標記已掌握</button>
-      <button type="button" data-row="${record._rowNumber}" data-status="已複習一次">已複習一次</button>
-      <button type="button" data-row="${record._rowNumber}" data-status="一週後再測錯">再測錯</button>
-    </div>
-  `;
+function renderMasteryAction(record) {
+  if (!record._rowNumber || record.status === "已掌握") return "";
+  return `<button class="mastery-button" type="button" data-row="${record._rowNumber}" data-status="已掌握">標記已掌握</button>`;
 }
 
 function renderErrorDetail(records) {
@@ -455,7 +358,7 @@ function renderErrorDetail(records) {
   if (!records.length) {
     selectedRow = null;
     setText("detailMeta", "沒有資料");
-    root.innerHTML = `<div class="empty">選擇一筆錯題後，這裡會顯示完整內容。</div>`;
+    root.innerHTML = `<div class="empty">選擇一張字卡後，這裡會顯示完整內容。</div>`;
     return;
   }
 
@@ -479,8 +382,10 @@ function renderErrorDetail(records) {
       ${detailItem("備註", record.note)}
     </div>
     <div class="detail-status">
-      <span class="status-chip">${escapeHtml(record.status)}</span>
-      ${renderStatusActions(record)}
+      <div class="mastery-row">
+        <span class="status-chip">${record.status === "已掌握" ? "已掌握" : "未掌握"}</span>
+        ${renderMasteryAction(record)}
+      </div>
     </div>
   `;
 }
@@ -499,7 +404,6 @@ function render(records, targetDate) {
   const total = records.length;
   const mastered = records.filter((record) => record.status === "已掌握").length;
   const open = total - mastered;
-  const due = getDueRecords(records).length;
   const sectionMap = countBy(records, "section");
   const reasonMap = countBy(records, "reason");
   const typeMap = countBy(records, "type");
@@ -507,18 +411,16 @@ function render(records, targetDate) {
 
   setText("totalErrors", total);
   setText("openErrors", open);
-  setText("dueReviews", due);
+  setText("masteredErrors", mastered);
   setText("daysLeft", `${daysUntilTarget(targetDate)} 天`);
   setText("strongWeakLabel", sectionEntries[0] ? `最多：${sectionEntries[0][0]}` : "");
 
-  renderDonut("sectionBars", sectionEntries, total, SECTION_COLORS, "大項");
+  renderDonut("sectionBars", sectionEntries, total, SECTION_COLORS, "題");
   renderBars("reasonBars", topEntries(reasonMap, 8), total);
-  renderDonut("typeBars", topEntries(typeMap, 8), total, null, "題型");
-  renderTrend(records);
-  renderStatusBreakdown(records);
+  renderDonut("typeBars", topEntries(typeMap, 8), total, null, "題");
   renderReasonInsight(records);
   renderErrorDetail(records);
-  renderTables(records);
+  renderFlashcards(records);
 }
 
 function setSetupVisibility(config) {
@@ -532,9 +434,7 @@ function setSetupVisibility(config) {
 function getFilters() {
   return {
     section: $("sectionFilter")?.value || "",
-    status: $("statusFilter")?.value || "",
-    reason: $("reasonFilter")?.value || "",
-    keyword: ($("keywordFilter")?.value || "").trim().toLowerCase()
+    reason: $("reasonFilter")?.value || ""
   };
 }
 
@@ -542,22 +442,9 @@ function applyFilters(records) {
   const filters = getFilters();
   return records.filter((record) => {
     if (filters.section && record.section !== filters.section) return false;
-    if (filters.status && record.status !== filters.status) return false;
     if (filters.reason && record.reason !== filters.reason) return false;
-    if (!filters.keyword) return true;
-    const haystack = [record.item, record.answer, record.tags, record.reason, record.type, record.exam, record.note]
-      .join(" ")
-      .toLowerCase();
-    return haystack.includes(filters.keyword);
+    return true;
   });
-}
-
-function getDueRecords(records) {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  return records
-    .filter((record) => record.status !== "已掌握")
-    .filter((record) => !record.reviewDate || record.reviewDate <= today);
 }
 
 function renderReasonInsight(filteredRecords) {
@@ -590,7 +477,7 @@ function getConfig() {
   const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
   const fromUrl = getUrlConfig();
   const config = {
-    sheetSource: saved.sheetSource || saved.csvUrl || "",
+    sheetSource: saved.sheetSource || saved.csvUrl || DEFAULT_SHEET_SOURCE,
     targetDate: saved.targetDate || "2026-12-06",
     updateEndpoint: saved.updateEndpoint || "",
     updateToken: saved.updateToken || ""
@@ -643,19 +530,24 @@ async function loadData(config, useSample = false) {
       localStorage.setItem(CACHE_KEY, JSON.stringify({ type: "csv", csv }));
       allRecords = parseCsv(csv).map(normalizeRecord).filter((record) => record.dateText || record.item);
     }
+    allRecords = applyLocalStatusOverrides(allRecords);
     render(applyFilters(allRecords), config.targetDate);
     setText("syncStatus", `已同步 ${allRecords.length} 筆`);
   } catch (error) {
+    if (!config.updateEndpoint) {
+      $("setupPanel").hidden = false;
+      $("settingsPanel").open = true;
+    }
     const cached = readCachedRecords();
     if (cached.length) {
-      allRecords = cached;
+      allRecords = applyLocalStatusOverrides(cached);
       render(applyFilters(allRecords), config.targetDate);
       setText("syncStatus", `同步失敗，使用快取 ${allRecords.length} 筆`);
       return;
     }
     allRecords = [];
     render([], config.targetDate);
-    setText("syncStatus", "同步失敗：請檢查設定");
+    setText("syncStatus", "同步失敗：請發布 CSV 或填 Web App URL");
   }
 }
 
@@ -713,6 +605,20 @@ function readCachedRecords() {
   return [];
 }
 
+function applyLocalStatusOverrides(records) {
+  const overrides = JSON.parse(localStorage.getItem(LOCAL_STATUS_OVERRIDES_KEY) || "{}");
+  return records.map((record) => {
+    const localStatus = overrides[record._rowNumber];
+    return localStatus ? { ...record, status: localStatus } : record;
+  });
+}
+
+function saveLocalStatusOverride(row, status) {
+  const overrides = JSON.parse(localStorage.getItem(LOCAL_STATUS_OVERRIDES_KEY) || "{}");
+  overrides[row] = status;
+  localStorage.setItem(LOCAL_STATUS_OVERRIDES_KEY, JSON.stringify(overrides));
+}
+
 function bindEvents() {
   $("saveSourceBtn").addEventListener("click", () => {
     const config = readConfigFromForm();
@@ -752,37 +658,40 @@ function bindEvents() {
     rerenderFromState();
   });
 
-  ["sectionFilter", "statusFilter", "reasonFilter", "keywordFilter"].forEach((id) => {
+  ["sectionFilter", "reasonFilter"].forEach((id) => {
     $(id)?.addEventListener("input", rerenderFromState);
   });
 
   $("clearFiltersBtn")?.addEventListener("click", () => {
     $("sectionFilter").value = "";
-    $("statusFilter").value = "";
     $("reasonFilter").value = "";
-    $("keywordFilter").value = "";
     rerenderFromState();
   });
 
   document.addEventListener("click", (event) => {
-    const viewButton = event.target.closest("[data-view-row]");
-    if (viewButton) {
-      selectedRow = Number(viewButton.dataset.viewRow);
-      renderErrorDetail(currentRecords);
-      document.querySelector(".detail-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    const button = event.target.closest("[data-row][data-status]");
+    if (button) {
+      updateStatus(Number(button.dataset.row), button.dataset.status);
       return;
     }
 
-    const button = event.target.closest("[data-row][data-status]");
-    if (!button) return;
-    updateStatus(Number(button.dataset.row), button.dataset.status);
+    const viewButton = event.target.closest(".flashcard[data-view-row]");
+    if (viewButton) {
+      selectedRow = Number(viewButton.dataset.viewRow);
+      renderErrorDetail(currentRecords);
+      renderFlashcards(currentRecords);
+      return;
+    }
   });
 }
 
 async function updateStatus(row, status) {
   const config = readConfigFromForm();
   if (!config.updateEndpoint) {
-    alert("請先在「資料來源與寫入設定」貼上 Apps Script Web App URL。");
+    saveLocalStatusOverride(row, status);
+    allRecords = allRecords.map((record) => record._rowNumber === row ? { ...record, status } : record);
+    rerenderFromState();
+    setText("syncStatus", `本機已標記：${status}`);
     return;
   }
 

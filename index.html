@@ -4,13 +4,15 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#f5f6f4" />
+    <meta name="theme-color" content="#11161c" media="(prefers-color-scheme: dark)" />
+    <meta name="color-scheme" content="light dark" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="N1錯題" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>JLPT N1 錯題分析</title>
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="apple-touch-icon" href="./icons/icon-192.svg" />
-    <link rel="stylesheet" href="./styles.css?v=11" />
+    <link rel="stylesheet" href="./styles.css?v=12" />
   </head>
   <body>
     <header class="app-header">
@@ -76,17 +78,6 @@
           </select>
         </div>
         <div class="field">
-          <label for="statusFilter">複習狀態</label>
-          <select id="statusFilter">
-            <option value="">全部</option>
-            <option value="未複習">未複習</option>
-            <option value="已複習一次">已複習一次</option>
-            <option value="一週後再測 OK">一週後再測 OK</option>
-            <option value="一週後再測錯">一週後再測錯</option>
-            <option value="已掌握">已掌握</option>
-          </select>
-        </div>
-        <div class="field">
           <label for="reasonFilter">錯誤原因</label>
           <select id="reasonFilter">
             <option value="">全部</option>
@@ -99,14 +90,10 @@
             <option value="定位錯誤">定位錯誤</option>
             <option value="推論過度">推論過度</option>
             <option value="聽不出關鍵字">聽不出關鍵字</option>
-            <option value="聽得懂但來不及選">聽得懂但來不及選</option>
+            <option value="聽到內容但來不及選">聽到內容但來不及選</option>
             <option value="被干擾選項騙">被干擾選項騙</option>
             <option value="粗心">粗心</option>
           </select>
-        </div>
-        <div class="field">
-          <label for="keywordFilter">關鍵字</label>
-          <input id="keywordFilter" type="search" placeholder="錯誤內容、正解、標籤" />
         </div>
         <button id="clearFiltersBtn" class="ghost-button" type="button">清除</button>
       </section>
@@ -134,8 +121,8 @@
           <strong id="openErrors">0</strong>
         </article>
         <article class="metric">
-          <span>到期複習</span>
-          <strong id="dueReviews">0</strong>
+          <span>已掌握</span>
+          <strong id="masteredErrors">0</strong>
         </article>
         <article class="metric">
           <span>距離考試</span>
@@ -145,7 +132,7 @@
 
       <section class="detail-panel" aria-label="錯題詳情">
         <div class="panel-heading">
-          <h2>錯題詳情</h2>
+          <h2>字卡預覽</h2>
           <span id="detailMeta">尚未選擇</span>
         </div>
         <div id="errorDetail" class="error-detail"></div>
@@ -174,69 +161,16 @@
           <div id="typeBars" class="bar-chart compact"></div>
         </article>
 
-        <article class="panel span-7">
+        <article class="panel span-12 flashcard-panel">
           <div class="panel-heading">
-            <h2>每週趨勢</h2>
+            <h2>錯題字卡</h2>
+            <span id="cardCount"></span>
           </div>
-          <div id="trendChart" class="trend-chart"></div>
-        </article>
-
-        <article class="panel span-5">
-          <div class="panel-heading">
-            <h2>複習進度</h2>
-          </div>
-          <div id="statusBars" class="bar-chart compact"></div>
-        </article>
-      </section>
-
-      <section class="table-grid">
-        <article class="panel">
-          <div class="panel-heading">
-            <h2>待複習</h2>
-            <span id="reviewCount"></span>
-          </div>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>日期</th>
-                  <th>大項</th>
-                  <th>錯誤內容</th>
-                  <th>原因</th>
-                  <th>狀態</th>
-                  <th>下次</th>
-                  <th>操作</th>
-                </tr>
-              </thead>
-              <tbody id="reviewRows"></tbody>
-            </table>
-          </div>
-        </article>
-
-        <article class="panel">
-          <div class="panel-heading">
-            <h2>最近錯題</h2>
-          </div>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>日期</th>
-                  <th>回次</th>
-                  <th>題型</th>
-                  <th>錯誤內容</th>
-                  <th>正解</th>
-                  <th>狀態</th>
-                  <th>操作</th>
-                </tr>
-              </thead>
-              <tbody id="recentRows"></tbody>
-            </table>
-          </div>
+          <div id="flashcardGrid" class="flashcard-grid"></div>
         </article>
       </section>
     </main>
 
-    <script src="./app.js?v=11" defer></script>
+    <script src="./app.js?v=12" defer></script>
   </body>
 </html>
