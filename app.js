@@ -395,9 +395,7 @@ function renderReviewCarousel(records) {
         <div class="detail-grid">
           ${detailItem("正解/意思", record.answer)}
           ${detailItem("讀音/原句", record.reading)}
-          ${detailItem("我的答案", record.mine)}
           ${detailItem("錯誤原因", record.reason)}
-          ${detailItem("標籤", record.tags)}
           ${detailItem("備註", record.note)}
         </div>
         <div class="detail-status">
