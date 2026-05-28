@@ -48,7 +48,7 @@ PWA 只需要貼上一個 Google Sheet 連結。支援：
 
 ## 直接從 PWA 更新複習狀態
 
-GitHub Pages 不能直接寫入 Google Sheet，所以狀態按鈕需要一個 Google Apps Script Web App。
+GitHub Pages 不能直接讀寫私人 Google Sheet，所以手機/電腦共用資料建議用 Google Apps Script Web App。PWA 會透過它讀取同一張 Sheet，也會用它寫回複習狀態。
 
 設定方式：
 
@@ -61,7 +61,7 @@ GitHub Pages 不能直接寫入 Google Sheet，所以狀態按鈕需要一個 Go
 7. 複製 Web App URL，貼到 PWA 的「資料來源與寫入設定」。
 8. 如果有設定 `UPDATE_TOKEN`，同一段密碼也填到 PWA 的「更新密碼」。
 
-之後在 PWA 點「已掌握」「已複習」「再測錯」，就會更新 Google Sheet 的 `複習狀態` 欄位。
+之後 PWA 會優先透過 Apps Script 同步資料；點「已掌握」「已複習」「再測錯」也會更新 Google Sheet 的 `複習狀態` 欄位。
 
 ## 讓手機和電腦看到同一份資料
 

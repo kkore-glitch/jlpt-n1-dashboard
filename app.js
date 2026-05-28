@@ -625,7 +625,7 @@ function readConfigFromForm() {
 async function loadData(config, useSample = false) {
   const url = useSample ? SAMPLE_URL : toCsvUrl(config);
   setSetupVisibility(config);
-  if (!url) {
+  if (!url && !config.updateEndpoint) {
     allRecords = [];
     render([], config.targetDate);
     setText("syncStatus", "尚未連結");
@@ -633,25 +633,84 @@ async function loadData(config, useSample = false) {
   }
   setText("syncStatus", "同步中");
   try {
-    const response = await fetch(url, { cache: "no-store" });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const csv = await response.text();
-    localStorage.setItem(CACHE_KEY, csv);
-    allRecords = parseCsv(csv).map(normalizeRecord).filter((record) => record.dateText || record.item);
+    if (config.updateEndpoint && !useSample) {
+      allRecords = await readRowsFromAppsScript(config);
+      localStorage.setItem(CACHE_KEY, JSON.stringify({ type: "json", rows: allRecords }));
+    } else {
+      const response = await fetch(url, { cache: "no-store" });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const csv = await response.text();
+      localStorage.setItem(CACHE_KEY, JSON.stringify({ type: "csv", csv }));
+      allRecords = parseCsv(csv).map(normalizeRecord).filter((record) => record.dateText || record.item);
+    }
     render(applyFilters(allRecords), config.targetDate);
     setText("syncStatus", `已同步 ${allRecords.length} 筆`);
   } catch (error) {
-    const cached = localStorage.getItem(CACHE_KEY);
-    if (cached) {
-      allRecords = parseCsv(cached).map(normalizeRecord).filter((record) => record.dateText || record.item);
+    const cached = readCachedRecords();
+    if (cached.length) {
+      allRecords = cached;
       render(applyFilters(allRecords), config.targetDate);
-      setText("syncStatus", `使用快取 ${allRecords.length} 筆`);
+      setText("syncStatus", `同步失敗，使用快取 ${allRecords.length} 筆`);
       return;
     }
     allRecords = [];
     render([], config.targetDate);
-    setText("syncStatus", "同步失敗");
+    setText("syncStatus", "同步失敗：請檢查設定");
   }
+}
+
+function readRowsFromAppsScript(config) {
+  return new Promise((resolve, reject) => {
+    const callbackName = `jlptRead_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    const script = document.createElement("script");
+    const timeout = window.setTimeout(() => {
+      cleanup();
+      reject(new Error("Apps Script read timeout"));
+    }, 15000);
+
+    function cleanup() {
+      window.clearTimeout(timeout);
+      delete window[callbackName];
+      script.remove();
+    }
+
+    window[callbackName] = (payload) => {
+      cleanup();
+      if (!payload?.ok) {
+        reject(new Error(payload?.error || "Apps Script read failed"));
+        return;
+      }
+      const rows = (payload.rows || [])
+        .map(normalizeRecord)
+        .filter((record) => record.dateText || record.item);
+      resolve(rows);
+    };
+
+    const endpoint = new URL(config.updateEndpoint);
+    endpoint.searchParams.set("action", "read");
+    endpoint.searchParams.set("callback", callbackName);
+    endpoint.searchParams.set("gid", getSheetGid(config.sheetSource));
+    if (config.updateToken) endpoint.searchParams.set("token", config.updateToken);
+    script.onerror = () => {
+      cleanup();
+      reject(new Error("Apps Script script load failed"));
+    };
+    script.src = endpoint.toString();
+    document.head.appendChild(script);
+  });
+}
+
+function readCachedRecords() {
+  const cached = localStorage.getItem(CACHE_KEY);
+  if (!cached) return [];
+  try {
+    const parsed = JSON.parse(cached);
+    if (parsed.type === "json") return parsed.rows || [];
+    if (parsed.type === "csv") return parseCsv(parsed.csv).map(normalizeRecord).filter((record) => record.dateText || record.item);
+  } catch {
+    return parseCsv(cached).map(normalizeRecord).filter((record) => record.dateText || record.item);
+  }
+  return [];
 }
 
 function bindEvents() {

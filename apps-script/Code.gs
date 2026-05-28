@@ -1,5 +1,36 @@
 const STATUS_HEADER = "複習狀態";
 
+function doGet(e) {
+  const params = e.parameter || {};
+  const token = PropertiesService.getScriptProperties().getProperty("UPDATE_TOKEN") || "";
+  if (token && params.token !== token) {
+    return jsonp(params.callback, { ok: false, error: "BAD_TOKEN" });
+  }
+
+  if (params.action !== "read") {
+    return jsonp(params.callback, { ok: false, error: "BAD_ACTION" });
+  }
+
+  const sheet = findSheet(params.gid);
+  const values = sheet.getDataRange().getValues();
+  if (values.length < 1) {
+    return jsonp(params.callback, { ok: true, rows: [] });
+  }
+
+  const headers = values[0].map((value) => String(value).trim());
+  const rows = values.slice(1)
+    .map((row, index) => {
+      const item = { _rowNumber: index + 2 };
+      headers.forEach((header, columnIndex) => {
+        item[header] = row[columnIndex] == null ? "" : String(row[columnIndex]);
+      });
+      return item;
+    })
+    .filter((item) => Object.keys(item).some((key) => key !== "_rowNumber" && item[key] !== ""));
+
+  return jsonp(params.callback, { ok: true, rows });
+}
+
 function doPost(e) {
   const params = e.parameter || {};
   const token = PropertiesService.getScriptProperties().getProperty("UPDATE_TOKEN") || "";
@@ -35,4 +66,13 @@ function json(payload) {
   return ContentService
     .createTextOutput(JSON.stringify(payload))
     .setMimeType(ContentService.MimeType.JSON);
+}
+
+function jsonp(callback, payload) {
+  const body = callback
+    ? `${callback}(${JSON.stringify(payload)});`
+    : JSON.stringify(payload);
+  return ContentService
+    .createTextOutput(body)
+    .setMimeType(callback ? ContentService.MimeType.JAVASCRIPT : ContentService.MimeType.JSON);
 }
