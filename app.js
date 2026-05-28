@@ -51,6 +51,9 @@ let allRecords = [];
 let currentRecords = [];
 let selectedRow = null;
 let cardTouchStartX = null;
+let cardTouchStartY = null;
+let cardSwipeX = 0;
+let cardAnimating = false;
 
 function parseCsv(text) {
   const rows = [];
@@ -420,6 +423,44 @@ function changeReviewCard(direction) {
   renderFlashcards(currentRecords);
 }
 
+function getActiveReviewCard() {
+  return document.querySelector(".review-card");
+}
+
+function resetReviewCardDrag() {
+  const card = getActiveReviewCard();
+  if (card) {
+    card.classList.remove("is-dragging");
+    card.style.transform = "";
+    card.style.opacity = "";
+  }
+  cardTouchStartX = null;
+  cardTouchStartY = null;
+  cardSwipeX = 0;
+}
+
+function animateReviewCard(direction, afterAnimation) {
+  const card = getActiveReviewCard();
+  if (!card || cardAnimating) return;
+  cardAnimating = true;
+  card.classList.remove("is-dragging");
+  card.style.transform = "";
+  card.style.opacity = "";
+  card.classList.add(direction > 0 ? "fly-left" : "fly-right");
+  window.setTimeout(() => {
+    cardAnimating = false;
+    if (afterAnimation) {
+      afterAnimation();
+    } else {
+      changeReviewCard(direction);
+    }
+  }, 260);
+}
+
+function animateMastery(row, status) {
+  animateReviewCard(1, () => updateStatus(row, status));
+}
+
 function detailItem(label, value) {
   return `
     <div class="detail-item">
@@ -701,13 +742,19 @@ function bindEvents() {
   document.addEventListener("click", (event) => {
     const carouselButton = event.target.closest("[data-carousel]");
     if (carouselButton) {
-      changeReviewCard(carouselButton.dataset.carousel === "next" ? 1 : -1);
+      animateReviewCard(carouselButton.dataset.carousel === "next" ? 1 : -1);
       return;
     }
 
     const button = event.target.closest("[data-row][data-status]");
     if (button) {
-      updateStatus(Number(button.dataset.row), button.dataset.status);
+      const row = Number(button.dataset.row);
+      const status = button.dataset.status;
+      if (row === selectedRow && status === MASTERED_STATUS && !cardAnimating) {
+        animateMastery(row, status);
+      } else {
+        updateStatus(row, status);
+      }
       return;
     }
 
@@ -724,17 +771,43 @@ function bindEvents() {
   });
 
   $("errorDetail")?.addEventListener("touchstart", (event) => {
+    if (cardAnimating) return;
     cardTouchStartX = event.changedTouches[0]?.clientX ?? null;
+    cardTouchStartY = event.changedTouches[0]?.clientY ?? null;
+    cardSwipeX = 0;
+  }, { passive: true });
+
+  $("errorDetail")?.addEventListener("touchmove", (event) => {
+    if (cardTouchStartX == null || cardTouchStartY == null || cardAnimating) return;
+    const touch = event.changedTouches[0];
+    const diffX = (touch?.clientX ?? cardTouchStartX) - cardTouchStartX;
+    const diffY = (touch?.clientY ?? cardTouchStartY) - cardTouchStartY;
+    if (Math.abs(diffY) > Math.abs(diffX) && Math.abs(diffY) > 14) return;
+    const card = getActiveReviewCard();
+    if (!card) return;
+    cardSwipeX = diffX;
+    const rotate = Math.max(-12, Math.min(12, diffX / 16));
+    const opacity = Math.max(0.55, 1 - Math.abs(diffX) / 360);
+    card.classList.add("is-dragging");
+    card.style.transform = `translateX(${diffX}px) rotate(${rotate}deg)`;
+    card.style.opacity = String(opacity);
   }, { passive: true });
 
   $("errorDetail")?.addEventListener("touchend", (event) => {
     if (cardTouchStartX == null) return;
     const endX = event.changedTouches[0]?.clientX ?? cardTouchStartX;
     const diff = endX - cardTouchStartX;
+    if (Math.abs(diff) < 80 && Math.abs(cardSwipeX) < 80) {
+      resetReviewCardDrag();
+      return;
+    }
     cardTouchStartX = null;
-    if (Math.abs(diff) < 45) return;
-    changeReviewCard(diff < 0 ? 1 : -1);
+    cardTouchStartY = null;
+    cardSwipeX = 0;
+    animateReviewCard(diff < 0 ? 1 : -1);
   }, { passive: true });
+
+  $("errorDetail")?.addEventListener("touchcancel", resetReviewCardDrag, { passive: true });
 }
 
 async function updateStatus(row, status) {

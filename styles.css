@@ -474,6 +474,36 @@ h2 {
   display: grid;
   gap: 14px;
   min-width: 0;
+  transform-origin: 50% 85%;
+  transition: transform 0.22s ease, opacity 0.22s ease, box-shadow 0.22s ease;
+  will-change: transform, opacity;
+}
+
+.review-card.is-dragging {
+  transition: none;
+  box-shadow: 0 18px 46px rgba(19, 26, 33, 0.18);
+}
+
+.review-card.fly-left {
+  animation: flyLeft 0.26s ease-in forwards;
+}
+
+.review-card.fly-right {
+  animation: flyRight 0.26s ease-in forwards;
+}
+
+@keyframes flyLeft {
+  to {
+    opacity: 0;
+    transform: translateX(-120%) rotate(-16deg);
+  }
+}
+
+@keyframes flyRight {
+  to {
+    opacity: 0;
+    transform: translateX(120%) rotate(16deg);
+  }
 }
 
 .carousel-button {
