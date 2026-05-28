@@ -1,0 +1,478 @@
+const HEADERS = {
+  date: "記錄日期",
+  exam: "考題回次",
+  section: "大項",
+  type: "題型",
+  no: "題號",
+  item: "錯誤內容",
+  reading: "讀音/原句",
+  answer: "正解/意思",
+  mine: "我的答案",
+  reason: "錯誤原因",
+  tags: "標籤",
+  status: "複習狀態",
+  reviewDate: "下次複習日",
+  note: "備註"
+};
+
+const SECTION_ORDER = ["單字語彙", "文法", "讀解", "聽解"];
+const SECTION_COLORS = {
+  "單字語彙": "#31546b",
+  "文法": "#4f6f52",
+  "讀解": "#c99d39",
+  "聽解": "#d86f45"
+};
+const STATUS_COLORS = {
+  "未複習": "#d86f45",
+  "已複習一次": "#c99d39",
+  "一週後再測 OK": "#4f6f52",
+  "一週後再測錯": "#b94f4f",
+  "已掌握": "#31546b"
+};
+const STATUS_ORDER = ["未複習", "已複習一次", "一週後再測錯", "一週後再測 OK", "已掌握"];
+
+const STORAGE_KEY = "jlpt-n1-tracker-config";
+const CACHE_KEY = "jlpt-n1-tracker-last-csv";
+const SAMPLE_URL = "./google-sheet-template.csv";
+
+const $ = (id) => document.getElementById(id);
+let allRecords = [];
+
+function parseCsv(text) {
+  const rows = [];
+  let row = [];
+  let value = "";
+  let quoted = false;
+  const clean = text.replace(/^\uFEFF/, "");
+
+  for (let i = 0; i < clean.length; i += 1) {
+    const char = clean[i];
+    const next = clean[i + 1];
+
+    if (char === '"' && quoted && next === '"') {
+      value += '"';
+      i += 1;
+    } else if (char === '"') {
+      quoted = !quoted;
+    } else if (char === "," && !quoted) {
+      row.push(value.trim());
+      value = "";
+    } else if ((char === "\n" || char === "\r") && !quoted) {
+      if (char === "\r" && next === "\n") i += 1;
+      row.push(value.trim());
+      if (row.some((cell) => cell !== "")) rows.push(row);
+      row = [];
+      value = "";
+    } else {
+      value += char;
+    }
+  }
+
+  row.push(value.trim());
+  if (row.some((cell) => cell !== "")) rows.push(row);
+  if (!rows.length) return [];
+
+  const headers = rows[0].map((header) => header.trim());
+  return rows.slice(1).map((cells) => {
+    const item = {};
+    headers.forEach((header, index) => {
+      item[header] = cells[index] || "";
+    });
+    return item;
+  });
+}
+
+function toCsvUrl(config) {
+  const source = config.sheetSource || config.csvUrl || "";
+  if (!source) return SAMPLE_URL;
+  if (source.includes("output=csv") || source.includes("format=csv")) return source;
+  if (source.includes("/pubhtml")) return source.replace("/pubhtml", "/pub").replace(/([?&])single=true&?/, "$1").replace(/[?&]$/, "") + "?output=csv";
+  if (source.includes("/pub?")) return source.includes("?") ? `${source}&output=csv` : `${source}?output=csv`;
+
+  const id = source.match(/\/spreadsheets\/d\/([^/?#]+)/)?.[1];
+  if (!id) return source;
+  const gid = source.match(/[?#&]gid=([0-9]+)/)?.[1] || "0";
+  return `https://docs.google.com/spreadsheets/d/${id}/export?format=csv&gid=${gid}`;
+}
+
+function parseDate(value) {
+  if (!value) return null;
+  const normalized = String(value).trim().replaceAll(".", "/").replaceAll("-", "/");
+  const parts = normalized.split("/").map(Number);
+  if (parts.length < 3 || parts.some(Number.isNaN)) return null;
+  const [year, month, day] = parts;
+  return new Date(year, month - 1, day);
+}
+
+function formatDate(date) {
+  if (!date) return "";
+  return `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()}`;
+}
+
+function normalizeRecord(record) {
+  return {
+    dateText: record[HEADERS.date] || "",
+    date: parseDate(record[HEADERS.date]),
+    exam: record[HEADERS.exam] || "",
+    section: record[HEADERS.section] || "未分類",
+    type: record[HEADERS.type] || "未分類",
+    no: record[HEADERS.no] || "",
+    item: record[HEADERS.item] || "",
+    reading: record[HEADERS.reading] || "",
+    answer: record[HEADERS.answer] || "",
+    mine: record[HEADERS.mine] || "",
+    reason: record[HEADERS.reason] || "未分類",
+    tags: record[HEADERS.tags] || "",
+    status: record[HEADERS.status] || "未複習",
+    reviewDateText: record[HEADERS.reviewDate] || "",
+    reviewDate: parseDate(record[HEADERS.reviewDate]),
+    note: record[HEADERS.note] || ""
+  };
+}
+
+function countBy(records, key) {
+  return records.reduce((map, record) => {
+    const value = record[key] || "未分類";
+    map.set(value, (map.get(value) || 0) + 1);
+    return map;
+  }, new Map());
+}
+
+function topEntries(map, limit = 8, preferredOrder = null) {
+  const entries = [...map.entries()];
+  entries.sort((a, b) => {
+    if (preferredOrder) {
+      const ai = preferredOrder.indexOf(a[0]);
+      const bi = preferredOrder.indexOf(b[0]);
+      if (ai >= 0 && bi >= 0) return ai - bi;
+    }
+    return b[1] - a[1] || a[0].localeCompare(b[0], "zh-Hant");
+  });
+  return entries.slice(0, limit);
+}
+
+function setText(id, value) {
+  $(id).textContent = value;
+}
+
+function renderBars(id, entries, total, colorByLabel = null) {
+  const root = $(id);
+  root.innerHTML = "";
+  if (!entries.length || total === 0) {
+    root.innerHTML = `<div class="empty">沒有資料</div>`;
+    return;
+  }
+
+  const max = Math.max(...entries.map(([, count]) => count), 1);
+  entries.forEach(([label, count]) => {
+    const percent = Math.round((count / total) * 100);
+    const width = Math.max(3, Math.round((count / max) * 100));
+    const color = colorByLabel?.[label] || "#31546b";
+    const row = document.createElement("div");
+    row.className = "bar-row";
+    row.innerHTML = `
+      <div class="bar-label">${escapeHtml(label)}</div>
+      <div class="bar-track"><div class="bar-fill" style="width:${width}%;background:${color}"></div></div>
+      <div class="bar-value">${count}｜${percent}%</div>
+    `;
+    root.appendChild(row);
+  });
+}
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#039;"
+  })[char]);
+}
+
+function renderTrend(records) {
+  const root = $("trendChart");
+  const dated = records.filter((record) => record.date).sort((a, b) => a.date - b.date);
+  if (!dated.length) {
+    root.innerHTML = `<div class="empty">沒有日期資料</div>`;
+    return;
+  }
+
+  const groups = new Map();
+  dated.forEach((record) => {
+    const week = startOfWeek(record.date);
+    const key = week.toISOString().slice(0, 10);
+    groups.set(key, (groups.get(key) || 0) + 1);
+  });
+  const points = [...groups.entries()].slice(-10);
+  const max = Math.max(...points.map(([, count]) => count), 1);
+  const width = 720;
+  const height = 230;
+  const pad = { left: 36, right: 18, top: 22, bottom: 38 };
+  const plotW = width - pad.left - pad.right;
+  const plotH = height - pad.top - pad.bottom;
+
+  const coords = points.map(([key, count], index) => {
+    const x = pad.left + (points.length === 1 ? plotW / 2 : (plotW / (points.length - 1)) * index);
+    const y = pad.top + plotH - (count / max) * plotH;
+    return { key, count, x, y };
+  });
+  const line = coords.map((point) => `${point.x},${point.y}`).join(" ");
+  const area = `${pad.left},${pad.top + plotH} ${line} ${pad.left + plotW},${pad.top + plotH}`;
+
+  root.innerHTML = `
+    <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="每週錯題趨勢">
+      <line x1="${pad.left}" y1="${pad.top + plotH}" x2="${pad.left + plotW}" y2="${pad.top + plotH}" stroke="#d9dedc" />
+      <line x1="${pad.left}" y1="${pad.top}" x2="${pad.left}" y2="${pad.top + plotH}" stroke="#d9dedc" />
+      <polygon points="${area}" fill="rgba(49,84,107,.12)"></polygon>
+      <polyline points="${line}" fill="none" stroke="#31546b" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"></polyline>
+      ${coords.map((point) => `
+        <circle cx="${point.x}" cy="${point.y}" r="5" fill="#d86f45"></circle>
+        <text x="${point.x}" y="${point.y - 10}" text-anchor="middle" class="trend-axis">${point.count}</text>
+        <text x="${point.x}" y="${height - 12}" text-anchor="middle" class="trend-axis">${Number(point.key.slice(5,7))}/${Number(point.key.slice(8,10))}</text>
+      `).join("")}
+    </svg>
+  `;
+}
+
+function startOfWeek(date) {
+  const copy = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const day = copy.getDay() || 7;
+  copy.setDate(copy.getDate() - day + 1);
+  return copy;
+}
+
+function renderProjection(records, targetDate) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const target = parseDate(targetDate) || new Date(2026, 11, 6);
+  const days = Math.max(0, Math.ceil((target - today) / 86400000));
+  const weeks = Math.max(1, Math.ceil(days / 7));
+  const open = records.filter((record) => record.status !== "已掌握").length;
+  const weekly = Math.ceil(open / weeks);
+  const recent = records.filter((record) => record.date && today - record.date <= 14 * 86400000).length;
+  const pace = `最近兩週新增 ${recent} 題；目前未掌握 ${open} 題，平均每週 ${weekly} 題。`;
+
+  setText("daysLeft", `${days} 天`);
+  $("projection").innerHTML = `
+    <div class="projection-main">
+      <div class="projection-cell"><span>剩餘週數</span><strong>${weeks}</strong></div>
+      <div class="projection-cell"><span>未掌握/週</span><strong>${weekly}</strong></div>
+    </div>
+    <p class="projection-note">${pace}</p>
+  `;
+}
+
+function renderStatusBreakdown(records) {
+  const root = $("statusBars");
+  const map = countBy(records, "status");
+  const entries = topEntries(map, 8, STATUS_ORDER);
+  renderBars("statusBars", entries, records.length, STATUS_COLORS);
+}
+
+function renderStudyMix(records) {
+  const root = $("studyMix");
+  if (!root) return;
+  const map = countBy(records.filter((record) => record.status !== "已掌握"), "section");
+  const entries = topEntries(map, 4, SECTION_ORDER);
+  const total = entries.reduce((sum, [, count]) => sum + count, 0);
+  root.innerHTML = "";
+  if (!total) {
+    root.innerHTML = `<div class="empty">沒有未掌握項目</div>`;
+    return;
+  }
+
+  entries.forEach(([label, count]) => {
+    const percent = Math.round((count / total) * 100);
+    const row = document.createElement("div");
+    row.className = "mix-row";
+    row.innerHTML = `
+      <div>${escapeHtml(label)}</div>
+      <div class="mix-pill"><span style="width:${percent}%;background:${SECTION_COLORS[label] || "#4f6f52"}"></span></div>
+      <strong>${percent}%</strong>
+    `;
+    root.appendChild(row);
+  });
+}
+
+function renderTables(records) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const due = records
+    .filter((record) => record.status !== "已掌握")
+    .filter((record) => !record.reviewDate || record.reviewDate <= today)
+    .sort((a, b) => (a.reviewDate || today) - (b.reviewDate || today))
+    .slice(0, 8);
+
+  setText("reviewCount", `${due.length} 項`);
+  $("reviewRows").innerHTML = due.length
+    ? due.map((record) => `
+      <tr>
+        <td>${escapeHtml(record.dateText)}</td>
+        <td>${escapeHtml(record.section)}</td>
+        <td>${escapeHtml(record.item)}</td>
+        <td>${escapeHtml(record.reason)}</td>
+        <td>${escapeHtml(record.reviewDateText)}</td>
+      </tr>
+    `).join("")
+    : `<tr><td colspan="5" class="empty">沒有到期項目</td></tr>`;
+
+  const recent = [...records]
+    .sort((a, b) => (b.date || 0) - (a.date || 0))
+    .slice(0, 10);
+  $("recentRows").innerHTML = recent.length
+    ? recent.map((record) => `
+      <tr>
+        <td>${escapeHtml(record.dateText)}</td>
+        <td>${escapeHtml(record.exam)}</td>
+        <td>${escapeHtml(record.type)}</td>
+        <td>${escapeHtml(record.item)}</td>
+        <td>${escapeHtml(record.answer)}</td>
+      </tr>
+    `).join("")
+    : `<tr><td colspan="5" class="empty">沒有資料</td></tr>`;
+}
+
+function render(records, targetDate) {
+  const total = records.length;
+  const mastered = records.filter((record) => record.status === "已掌握").length;
+  const open = total - mastered;
+  const mastery = total ? Math.round((mastered / total) * 100) : 0;
+  const sectionMap = countBy(records, "section");
+  const reasonMap = countBy(records, "reason");
+  const typeMap = countBy(records, "type");
+  const sectionEntries = topEntries(sectionMap, 8, SECTION_ORDER);
+
+  setText("totalErrors", total);
+  setText("openErrors", open);
+  setText("masteryRate", `${mastery}%`);
+  setText("strongWeakLabel", sectionEntries[0] ? `最多：${sectionEntries[0][0]}` : "");
+
+  renderBars("sectionBars", sectionEntries, total, SECTION_COLORS);
+  renderBars("reasonBars", topEntries(reasonMap, 8), total);
+  renderBars("typeBars", topEntries(typeMap, 8), total);
+  renderProjection(records, targetDate);
+  renderTrend(records);
+  renderStatusBreakdown(records);
+  renderTables(records);
+}
+
+function getFilters() {
+  return {
+    section: $("sectionFilter")?.value || "",
+    status: $("statusFilter")?.value || "",
+    keyword: ($("keywordFilter")?.value || "").trim().toLowerCase()
+  };
+}
+
+function applyFilters(records) {
+  const filters = getFilters();
+  return records.filter((record) => {
+    if (filters.section && record.section !== filters.section) return false;
+    if (filters.status && record.status !== filters.status) return false;
+    if (!filters.keyword) return true;
+    const haystack = [record.item, record.answer, record.tags, record.reason, record.type, record.exam, record.note]
+      .join(" ")
+      .toLowerCase();
+    return haystack.includes(filters.keyword);
+  });
+}
+
+function rerenderFromState() {
+  const config = readConfigFromForm();
+  render(applyFilters(allRecords), config.targetDate);
+}
+
+function getConfig() {
+  const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
+  return {
+    sheetSource: saved.sheetSource || saved.csvUrl || "",
+    targetDate: saved.targetDate || "2026-12-06"
+  };
+}
+
+function setConfig(config) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
+}
+
+function fillConfig(config) {
+  $("sheetSource").value = config.sheetSource;
+  $("targetDate").value = config.targetDate;
+}
+
+function readConfigFromForm() {
+  return {
+    sheetSource: $("sheetSource").value.trim(),
+    targetDate: $("targetDate").value || "2026-12-06"
+  };
+}
+
+async function loadData(config, useSample = false) {
+  const url = useSample ? SAMPLE_URL : toCsvUrl(config);
+  setText("syncStatus", "同步中");
+  try {
+    const response = await fetch(url, { cache: "no-store" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const csv = await response.text();
+    localStorage.setItem(CACHE_KEY, csv);
+    allRecords = parseCsv(csv).map(normalizeRecord).filter((record) => record.dateText || record.item);
+    render(applyFilters(allRecords), config.targetDate);
+    setText("syncStatus", `已同步 ${allRecords.length} 筆`);
+  } catch (error) {
+    const cached = localStorage.getItem(CACHE_KEY);
+    if (cached) {
+      allRecords = parseCsv(cached).map(normalizeRecord).filter((record) => record.dateText || record.item);
+      render(applyFilters(allRecords), config.targetDate);
+      setText("syncStatus", `使用快取 ${allRecords.length} 筆`);
+      return;
+    }
+    allRecords = [];
+    render([], config.targetDate);
+    setText("syncStatus", "同步失敗");
+  }
+}
+
+function bindEvents() {
+  $("saveSourceBtn").addEventListener("click", () => {
+    const config = readConfigFromForm();
+    setConfig(config);
+    loadData(config);
+  });
+
+  $("reloadBtn").addEventListener("click", () => {
+    const config = readConfigFromForm();
+    setConfig(config);
+    loadData(config);
+  });
+
+  $("sampleBtn").addEventListener("click", () => {
+    const config = readConfigFromForm();
+    setConfig(config);
+    loadData(config, true);
+  });
+
+  $("targetDate").addEventListener("change", () => {
+    const config = readConfigFromForm();
+    setConfig(config);
+    rerenderFromState();
+  });
+
+  ["sectionFilter", "statusFilter", "keywordFilter"].forEach((id) => {
+    $(id)?.addEventListener("input", rerenderFromState);
+  });
+
+  $("clearFiltersBtn")?.addEventListener("click", () => {
+    $("sectionFilter").value = "";
+    $("statusFilter").value = "";
+    $("keywordFilter").value = "";
+    rerenderFromState();
+  });
+}
+
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("./sw.js");
+}
+
+const initialConfig = getConfig();
+fillConfig(initialConfig);
+bindEvents();
+loadData(initialConfig, !initialConfig.sheetSource);
