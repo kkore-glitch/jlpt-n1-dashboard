@@ -1,9 +1,9 @@
-const CACHE_NAME = "jlpt-n1-tracker-v8";
+const CACHE_NAME = "jlpt-n1-tracker-v10";
 const APP_FILES = [
   "./",
   "./index.html",
-  "./styles.css?v=8",
-  "./app.js?v=8",
+  "./styles.css?v=10",
+  "./app.js?v=10",
   "./manifest.webmanifest",
   "./google-sheet-template.csv",
   "./icons/icon-192.svg",

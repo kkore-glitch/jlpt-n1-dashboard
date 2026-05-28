@@ -10,7 +10,7 @@
     <title>JLPT N1 錯題分析</title>
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="apple-touch-icon" href="./icons/icon-192.svg" />
-    <link rel="stylesheet" href="./styles.css?v=8" />
+    <link rel="stylesheet" href="./styles.css?v=10" />
   </head>
   <body>
     <header class="app-header">
@@ -48,6 +48,7 @@
           </div>
           <button id="saveSourceBtn" class="primary-button" type="button">儲存並讀取</button>
           <button id="openSheetBtn" class="ghost-button" type="button">開啟表格</button>
+          <button id="copyDashboardLinkBtn" class="ghost-button" type="button">複製儀表板連結</button>
         </div>
       </details>
 
@@ -123,14 +124,6 @@
         <div id="reasonExamples" class="reason-examples"></div>
       </section>
 
-      <section class="status-guide" aria-label="複習狀態更新方式">
-        <div>
-          <span>狀態更新方式</span>
-          <strong>設定狀態按鈕後，可直接從表格寫回 Google Sheet</strong>
-        </div>
-        <p>點「已掌握」會寫回同一張 Google Sheet，畫面也會立即更新。只有你直接到 Google Sheet 新增或修改錯題時，才需要按右上角刷新。</p>
-      </section>
-
       <section class="metrics-grid" aria-label="總覽指標">
         <article class="metric">
           <span>累計錯題</span>
@@ -148,6 +141,14 @@
           <span>距離考試</span>
           <strong id="daysLeft">0 天</strong>
         </article>
+      </section>
+
+      <section class="detail-panel" aria-label="錯題詳情">
+        <div class="panel-heading">
+          <h2>錯題詳情</h2>
+          <span id="detailMeta">尚未選擇</span>
+        </div>
+        <div id="errorDetail" class="error-detail"></div>
       </section>
 
       <section class="dashboard-grid">
@@ -236,6 +237,6 @@
       </section>
     </main>
 
-    <script src="./app.js?v=8" defer></script>
+    <script src="./app.js?v=10" defer></script>
   </body>
 </html>

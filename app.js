@@ -51,6 +51,8 @@ const SAMPLE_URL = "./google-sheet-template.csv";
 
 const $ = (id) => document.getElementById(id);
 let allRecords = [];
+let currentRecords = [];
+let selectedRow = null;
 
 function parseCsv(text) {
   const rows = [];
@@ -122,6 +124,37 @@ function getSheetGid(source) {
   return source.match(/[?#&]gid=([0-9]+)/)?.[1] || "";
 }
 
+function encodeConfigValue(value) {
+  return btoa(encodeURIComponent(value || ""));
+}
+
+function decodeConfigValue(value) {
+  try {
+    return decodeURIComponent(atob(value || ""));
+  } catch {
+    return "";
+  }
+}
+
+function getUrlConfig() {
+  const params = new URLSearchParams(location.search);
+  return {
+    sheetSource: decodeConfigValue(params.get("sheet")),
+    updateEndpoint: decodeConfigValue(params.get("api")),
+    updateToken: decodeConfigValue(params.get("token")),
+    targetDate: params.get("date") || ""
+  };
+}
+
+function buildDashboardLink(config) {
+  const params = new URLSearchParams();
+  if (config.sheetSource) params.set("sheet", encodeConfigValue(config.sheetSource));
+  if (config.updateEndpoint) params.set("api", encodeConfigValue(config.updateEndpoint));
+  if (config.updateToken) params.set("token", encodeConfigValue(config.updateToken));
+  if (config.targetDate) params.set("date", config.targetDate);
+  return `${location.origin}${location.pathname}?${params.toString()}`;
+}
+
 function parseDate(value) {
   if (!value) return null;
   const normalized = String(value).trim().replaceAll(".", "/").replaceAll("-", "/");
@@ -138,6 +171,7 @@ function formatDate(date) {
 
 function normalizeRecord(record) {
   return {
+    _rowNumber: record._rowNumber,
     dateText: record[HEADERS.date] || "",
     date: parseDate(record[HEADERS.date]),
     exam: record[HEADERS.exam] || "",
@@ -376,7 +410,7 @@ function renderTables(records) {
         <td>${escapeHtml(record.reason)}</td>
         <td><span class="status-chip">${escapeHtml(record.status)}</span></td>
         <td>${escapeHtml(record.reviewDateText)}</td>
-        <td>${renderStatusActions(record)}</td>
+        <td>${renderViewAction(record)}</td>
       </tr>
     `).join("")
     : `<tr><td colspan="7" class="empty">沒有到期項目</td></tr>`;
@@ -393,24 +427,75 @@ function renderTables(records) {
         <td>${escapeHtml(record.item)}</td>
         <td>${escapeHtml(record.answer)}</td>
         <td><span class="status-chip">${escapeHtml(record.status)}</span></td>
-        <td>${renderStatusActions(record)}</td>
+        <td>${renderViewAction(record)}</td>
       </tr>
     `).join("")
     : `<tr><td colspan="7" class="empty">沒有資料</td></tr>`;
+}
+
+function renderViewAction(record) {
+  if (!record._rowNumber) return "";
+  return `<button class="view-button" type="button" data-view-row="${record._rowNumber}">查看</button>`;
 }
 
 function renderStatusActions(record) {
   if (!record._rowNumber) return "";
   return `
     <div class="status-actions">
-      <button type="button" data-row="${record._rowNumber}" data-status="已掌握">已掌握</button>
-      <button type="button" data-row="${record._rowNumber}" data-status="已複習一次">已複習</button>
+      <button type="button" data-row="${record._rowNumber}" data-status="已掌握">標記已掌握</button>
+      <button type="button" data-row="${record._rowNumber}" data-status="已複習一次">已複習一次</button>
       <button type="button" data-row="${record._rowNumber}" data-status="一週後再測錯">再測錯</button>
     </div>
   `;
 }
 
+function renderErrorDetail(records) {
+  const root = $("errorDetail");
+  if (!root) return;
+  if (!records.length) {
+    selectedRow = null;
+    setText("detailMeta", "沒有資料");
+    root.innerHTML = `<div class="empty">選擇一筆錯題後，這裡會顯示完整內容。</div>`;
+    return;
+  }
+
+  if (!selectedRow || !records.some((record) => record._rowNumber === selectedRow)) {
+    selectedRow = records[0]._rowNumber;
+  }
+
+  const record = records.find((item) => item._rowNumber === selectedRow);
+  setText("detailMeta", `${record.exam || "未標回次"}｜${record.section}｜${record.type}`);
+  root.innerHTML = `
+    <div class="detail-main">
+      <span>錯誤內容</span>
+      <strong>${escapeHtml(record.item || "-")}</strong>
+    </div>
+    <div class="detail-grid">
+      ${detailItem("正解/意思", record.answer)}
+      ${detailItem("讀音/原句", record.reading)}
+      ${detailItem("我的答案", record.mine)}
+      ${detailItem("錯誤原因", record.reason)}
+      ${detailItem("標籤", record.tags)}
+      ${detailItem("備註", record.note)}
+    </div>
+    <div class="detail-status">
+      <span class="status-chip">${escapeHtml(record.status)}</span>
+      ${renderStatusActions(record)}
+    </div>
+  `;
+}
+
+function detailItem(label, value) {
+  return `
+    <div class="detail-item">
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(value || "-")}</strong>
+    </div>
+  `;
+}
+
 function render(records, targetDate) {
+  currentRecords = records;
   const total = records.length;
   const mastered = records.filter((record) => record.status === "已掌握").length;
   const open = total - mastered;
@@ -432,6 +517,7 @@ function render(records, targetDate) {
   renderTrend(records);
   renderStatusBreakdown(records);
   renderReasonInsight(records);
+  renderErrorDetail(records);
   renderTables(records);
 }
 
@@ -502,12 +588,18 @@ function rerenderFromState() {
 
 function getConfig() {
   const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
-  return {
+  const fromUrl = getUrlConfig();
+  const config = {
     sheetSource: saved.sheetSource || saved.csvUrl || "",
     targetDate: saved.targetDate || "2026-12-06",
     updateEndpoint: saved.updateEndpoint || "",
     updateToken: saved.updateToken || ""
   };
+  if (fromUrl.sheetSource) config.sheetSource = fromUrl.sheetSource;
+  if (fromUrl.updateEndpoint) config.updateEndpoint = fromUrl.updateEndpoint;
+  if (fromUrl.updateToken) config.updateToken = fromUrl.updateToken;
+  if (fromUrl.targetDate) config.targetDate = fromUrl.targetDate;
+  return config;
 }
 
 function setConfig(config) {
@@ -583,6 +675,18 @@ function bindEvents() {
     if (sheetUrl) window.open(sheetUrl, "_blank", "noopener");
   });
 
+  $("copyDashboardLinkBtn")?.addEventListener("click", async () => {
+    const config = readConfigFromForm();
+    setConfig(config);
+    const link = buildDashboardLink(config);
+    try {
+      await navigator.clipboard.writeText(link);
+      setText("syncStatus", "已複製連結");
+    } catch {
+      prompt("複製這個儀表板連結", link);
+    }
+  });
+
   $("targetDate").addEventListener("change", () => {
     const config = readConfigFromForm();
     setConfig(config);
@@ -602,6 +706,14 @@ function bindEvents() {
   });
 
   document.addEventListener("click", (event) => {
+    const viewButton = event.target.closest("[data-view-row]");
+    if (viewButton) {
+      selectedRow = Number(viewButton.dataset.viewRow);
+      renderErrorDetail(currentRecords);
+      document.querySelector(".detail-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
+
     const button = event.target.closest("[data-row][data-status]");
     if (!button) return;
     updateStatus(Number(button.dataset.row), button.dataset.status);
@@ -611,7 +723,7 @@ function bindEvents() {
 async function updateStatus(row, status) {
   const config = readConfigFromForm();
   if (!config.updateEndpoint) {
-    alert("請先打開「狀態按鈕設定」，貼上 Apps Script Web App URL。");
+    alert("請先在「資料來源與寫入設定」貼上 Apps Script Web App URL。");
     return;
   }
 
