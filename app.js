@@ -640,7 +640,7 @@ async function updateStatus(row, status) {
 }
 
 if ("serviceWorker" in navigator) {
-  navigator.serviceWorker.register("./sw.js");
+  navigator.serviceWorker.register("./sw.js").then((registration) => registration.update());
 }
 
 const initialConfig = getConfig();
